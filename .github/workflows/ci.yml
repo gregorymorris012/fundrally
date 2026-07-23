@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npx tsc --noEmit
+
+      # ubuntu-latest ships Docker preinstalled, which `supabase start` needs.
+      - name: Start Supabase
+        run: npx supabase start
+
+      - name: Export Supabase connection info
+        run: |
+          npx supabase status -o env > supabase-status.env
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(grep '^API_URL=' supabase-status.env | cut -d= -f2- | tr -d '\"')"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(grep '^ANON_KEY=' supabase-status.env | cut -d= -f2- | tr -d '\"')"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' supabase-status.env | cut -d= -f2- | tr -d '\"')"
+            echo "DATABASE_URL=$(grep '^DB_URL=' supabase-status.env | cut -d= -f2- | tr -d '\"')"
+          } >> "$GITHUB_ENV"
+
+      - name: Apply migrations
+        run: npm run db:migrate
+
+      # Mandatory per FundRally-Build-Spec.md section 9: a failing RLS test
+      # blocks merge. No feature work should ever bypass this gate.
+      - name: Run RLS test suite
+        run: npm run test:rls
+
+      - name: Stop Supabase
+        if: always()
+        run: npx supabase stop
