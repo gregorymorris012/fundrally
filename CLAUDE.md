@@ -20,13 +20,16 @@ and every fundraiser format must be independently enable-able per tenant
 (gaming law varies by state — see `module_availability` in the spec).
 
 Currently implemented: **Phase 0 (auth, `organizations`, `memberships`,
-RLS) and Phase 1 (Stripe Connect onboarding, PaymentIntents, webhook
-handler, `transactions` ledger, refunds)**. No fundraiser modules yet
-(auction, wheel, product, squares, 50/50, golf, item raffle) — the only
-money-moving flow is a trivial direct donation, which exists specifically
-to prove the payment spine end-to-end. Don't assume later-phase tables
-(`draws`, `modules`, `module_availability`, `compliance_records`, etc.)
-exist; check `db/schema/` before referencing them.
+RLS), Phase 1 (Stripe Connect onboarding, PaymentIntents, webhook handler,
+`transactions` ledger, refunds), and Phase 2 (the `product` module — shop
+catalog, cart, checkout, admin order history)**. `product` is the only
+`modules.type` with any code behind it — auction/wheel/squares/fifty_fifty/
+golf/item_raffle are Phase 5/6/7 and don't exist yet beyond the enum value.
+Don't assume later-phase tables (`draws`, `module_availability`,
+`compliance_records`, etc.) exist; check `db/schema/` before referencing
+them. In particular, don't build UI for the chance-based module types
+(wheel, squares, fifty_fifty, item_raffle) before Phase 4's compliance
+gating exists — the build spec is explicit that they can't ship without it.
 
 ## Commands
 
@@ -159,11 +162,59 @@ The platform fee is one constant: `PLATFORM_FEE_BPS` in
 `src/lib/stripe/fees.ts`, currently `0`. Change that value when pricing is
 decided; nothing else needs to move.
 
+### Product module (Phase 2)
+
+Validates the shared ledger under a real module, per the build spec's
+Phase 2 goal. Shape: `modules` (type='product') belongs to a fundraiser;
+`products` belong to a module; a checkout produces one `orders` row plus
+one `order_items` row per line item. `db/schema/modules.ts` explains why
+`org_id` is denormalized onto modules/products (and transactions) —
+avoids a join in every RLS policy.
+
+Unlike `organizations`/`participants`, module and product creation use
+plain RLS INSERT policies gated to `is_org_admin()`
+(`db/migrations/0007_phase2_policies.sql`) — same reasoning as
+fundraisers: the actor already has a membership row, so there's no
+bootstrapping problem requiring a `SECURITY DEFINER` RPC.
+
+Checkout (`src/lib/payments/create-order-intent.ts`) mirrors
+`createDonationIntent` almost exactly, with one addition: it recomputes
+the order total **server-side from the current `products.price_cents`**,
+never from anything the client sends — the cart on the client is just
+`{productId: quantity}` UI state, not a source of truth. It creates the
+`orders`/`order_items` rows as `status: "pending"` via the service role
+*before* the PaymentIntent is confirmed; the webhook
+(`handlePaymentIntentSucceeded` in `webhook-handlers.ts`) is what flips the
+order to `"paid"` and links `transaction_id` once `payment_intent.succeeded`
+actually arrives — same rule-3 shape as everything else. A failed payment
+flips the order to `"failed"` with no ledger row, mirroring the donation
+failure path. The PaymentIntent's `metadata.order_id` /
+`metadata.module_id` are what let the webhook find the right order and
+tag the transaction's `module_id` — donations never set `module_id` since
+they aren't tied to a module.
+
+The admin view lives at
+`src/app/org/[orgSlug]/fundraisers/[fundraiserSlug]/page.tsx` (not the
+top-level org dashboard — that would get unwieldy once more module types
+exist): enable the product module, add products, and see order history
+with guest name/total/line items via nested `select()` embeds
+(`orders(...,participants(...),order_items(...,products(...)))`) rather
+than separate queries. The public catalog is
+`src/app/shop/[orgSlug]/[fundraiserSlug]/page.tsx`, readable by signed-out
+guests via the same kind of `anon` policy exception as the donate page
+(`"public can read active product modules/products"` in
+`db/migrations/0007_phase2_policies.sql`). `StripeCheckoutStep`
+(`src/components/payments/stripe-checkout-step.tsx`) is the Stripe
+Elements mount-and-confirm step shared between `DonateForm` and
+`ShopCart` — don't duplicate it a third time if a future module also ends
+in a PaymentIntent confirmation.
+
 ### RLS testing
 
-`tests/rls/cross-tenant.test.ts` (org/membership tables) and
+`tests/rls/cross-tenant.test.ts` (org/membership tables),
 `tests/rls/phase1-cross-tenant.test.ts` (fundraisers/participants/
-transactions/audit_log, plus the intentional anon-read exception above) are
+transactions/audit_log), and `tests/rls/phase2-cross-tenant.test.ts`
+(modules/products/orders/order_items, plus the anon-read exceptions) are
 the templates every future table's RLS test should follow: sign in real
 users via the phone-OTP test flow (`[auth.sms.test_otp]` in
 `supabase/config.toml` — fixed OTP codes for local dev, no live Twilio
@@ -174,6 +225,17 @@ checking the *actual database state* via a service-role client afterward,
 not just the client response shape. CI (`.github/workflows/ci.yml`) runs
 both this suite and `test:money` on every push/PR and treats a failure as
 a merge blocker, per build spec section 9.
+
+**Every test file must use its own disjoint slice of `tests/helpers.ts`'s
+`TEST_PHONES` indices (0-9) — never reuse an index another file also
+uses.** gotrue rate-limits phone OTP requests to one per 5s *per number,
+across all processes*, not per test file. This isn't hypothetical: adding
+Phase 2's test files with everyone reusing indices 0-2 made the full suite
+fail nearly every run. The comment above `TEST_PHONES` in `tests/helpers.ts`
+tracks the current allocation — update it when you add a file that signs
+in a test user. (Running the whole suite twice within ~5s of itself will
+still hit the limit even with disjoint indices — that's the real rate
+limiter working as intended, not a bug.)
 
 ### Local Supabase gotchas (verified empirically, not documented by Supabase)
 
@@ -228,15 +290,53 @@ a merge blocker, per build spec section 9.
   functions, which doesn't pool well on Vercel without something like
   Supavisor in front of it.
 
+### Production deployment
+
+Production is `https://fundrally.vercel.app`, backed by a real hosted
+Supabase project (linked via Supabase's official Vercel integration, not
+manually-copied keys) and real migrations already applied. A few things
+that weren't obvious setting this up:
+
+- **The Supabase Vercel integration creates its own env var names**
+  (`SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SECRET_KEY`,
+  `POSTGRES_URL`, etc.), separate from what this app's code reads
+  (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  `SUPABASE_SERVICE_ROLE_KEY`, `DATABASE_URL`). It turned out to also
+  overwrite the latter set where names already existed (they'd been
+  seeded with placeholders earlier to unblock a build) — but don't count
+  on that; verify actual values after connecting a new integration rather
+  than assuming a name match. `DATABASE_URL` isn't created by the
+  integration at all; source it from `POSTGRES_URL_NON_POOLING` (direct
+  connection — better than the pooled `POSTGRES_URL` for one-shot
+  migration runs, which can be finicky through a transaction-mode pooler).
+- **`NEXT_PUBLIC_*` vars are baked into the client bundle at build time**,
+  not read at request time. Updating them in Vercel's dashboard does
+  nothing to an already-built deployment — you need a fresh `vercel --prod`
+  (or a new push) before the new values take effect client-side.
+- **This sandboxed shell redacts real-looking secrets even mid-pipeline**,
+  not just in what gets displayed back — a real Postgres connection string
+  piped through `$(...)` into `DATABASE_URL` for a child process arrived
+  at that process as the literal string `[SENSITIVE]`, not the real value
+  (surfaced as a Postgres "Invalid URL" error). Applying migrations to a
+  real hosted database from this environment doesn't work as a result;
+  that has to be run by a human in a real terminal (`vercel env pull` +
+  `drizzle-kit migrate` with the pulled `DATABASE_URL`).
+- **Supabase Auth's Site URL / Redirect URLs are dashboard-only config**,
+  not something in a migration — set under Authentication → URL
+  Configuration to the production domain plus `/auth/callback` and
+  `/org/*/stripe/callback`, or magic-link redirects and the Stripe Connect
+  OAuth callback will point at the wrong place.
+
 ### Build phases
 
 The build spec (section 8) sequences work as: Phase 0 foundation (done) →
-Phase 1 money spine (done) → Phase 2 first module (product/cookie sale) →
-Phase 3 reporting/payouts → Phase 4 compliance gating → Phase 5 auction →
-Phase 6 chance modules → Phase 7 golf → Phase 8 comms/sponsors. Don't jump
-ahead — e.g. don't build chance-module UI before `module_availability`
-gating exists (Phase 4), and don't assume a `modules` table exists without
-checking `db/schema/` (Phase 2 is what introduces it).
+Phase 1 money spine (done) → Phase 2 first module (done, product/cookie
+sale) → Phase 3 reporting/payouts → Phase 4 compliance gating → Phase 5
+auction → Phase 6 chance modules → Phase 7 golf → Phase 8 comms/sponsors.
+Don't jump ahead — e.g. don't build chance-module UI before
+`module_availability` gating exists (Phase 4), and don't assume a
+`draws` table exists without checking `db/schema/` (Phase 6 is what
+introduces it).
 
 ### Base UI note
 

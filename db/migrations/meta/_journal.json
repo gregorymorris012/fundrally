@@ -43,6 +43,20 @@
       "when": 1784910673797,
       "tag": "0005_public_donate_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784914184267,
+      "tag": "0006_awesome_siren",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1784914208413,
+      "tag": "0007_phase2_policies",
+      "breakpoints": true
     }
   ]
 }

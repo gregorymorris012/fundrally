@@ -1,19 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { loadStripe } from "@stripe/stripe-js";
-import {
-  Elements,
-  PaymentElement,
-  useElements,
-  useStripe,
-} from "@stripe/react-stripe-js";
+import { Elements } from "@stripe/react-stripe-js";
 import { createDonationIntent } from "@/lib/payments/create-donation-intent";
+import { stripePromise, StripeCheckoutStep } from "@/components/payments/stripe-checkout-step";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-
-const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
 export function DonateForm({
   orgSlug,
@@ -55,7 +48,10 @@ export function DonateForm({
   if (clientSecret) {
     return (
       <Elements stripe={stripePromise} options={{ clientSecret }}>
-        <PaymentStep />
+        <StripeCheckoutStep
+          returnUrl={`${window.location.origin}${window.location.pathname}/success`}
+          submitLabel="Donate"
+        />
       </Elements>
     );
   }
@@ -96,45 +92,6 @@ export function DonateForm({
       {error && <p className="text-sm text-destructive">{error}</p>}
       <Button type="submit" disabled={loading} className="w-full">
         Continue
-      </Button>
-    </form>
-  );
-}
-
-function PaymentStep() {
-  const stripe = useStripe();
-  const elements = useElements();
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function handleConfirm(e: React.FormEvent) {
-    e.preventDefault();
-    if (!stripe || !elements) return;
-    setSubmitting(true);
-    setError(null);
-
-    // Card data never reaches our server (build spec's primary
-    // constraint) — Stripe Elements handles it and confirms directly with
-    // Stripe from the browser.
-    const { error } = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}${window.location.pathname}/success`,
-      },
-    });
-
-    if (error) {
-      setError(error.message ?? "payment failed");
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <form className="space-y-3" onSubmit={handleConfirm}>
-      <PaymentElement />
-      {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" disabled={!stripe || submitting} className="w-full">
-        Donate
       </Button>
     </form>
   );

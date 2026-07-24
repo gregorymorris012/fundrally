@@ -67,6 +67,8 @@ async function handlePaymentIntentSucceeded(
   const orgId = pi.metadata.org_id;
   const fundraiserId = pi.metadata.fundraiser_id;
   const participantId = pi.metadata.participant_id;
+  const moduleId = pi.metadata.module_id || null;
+  const orderId = pi.metadata.order_id || null;
   const kind = (pi.metadata.kind || "donation") as
     | "purchase"
     | "bid_win"
@@ -83,6 +85,7 @@ async function handlePaymentIntentSucceeded(
     .insert({
       org_id: orgId,
       fundraiser_id: fundraiserId,
+      module_id: moduleId,
       participant_id: participantId,
       kind,
       gross_cents: grossCents,
@@ -97,6 +100,17 @@ async function handlePaymentIntentSucceeded(
     .select()
     .single();
   if (transactionError) throw transactionError;
+
+  // Phase 2: a `purchase` PaymentIntent created via createOrderIntent
+  // carries the pending order's id in metadata — flip it to paid and link
+  // the transaction now that the webhook (the source of truth, rule 3)
+  // confirms the charge actually succeeded.
+  if (kind === "purchase" && orderId) {
+    await admin
+      .from("orders")
+      .update({ status: "paid", transaction_id: transaction?.id ?? null })
+      .eq("id", orderId);
+  }
 
   await admin.from("audit_log").insert({
     org_id: orgId,
@@ -113,6 +127,11 @@ async function handlePaymentIntentFailed(
   const pi = event.data.object as Stripe.PaymentIntent;
   const orgId = pi.metadata.org_id;
   if (!orgId) return;
+
+  const orderId = pi.metadata.order_id || null;
+  if (pi.metadata.kind === "purchase" && orderId) {
+    await admin.from("orders").update({ status: "failed" }).eq("id", orderId);
+  }
 
   // No ledger row — the ledger reflects money that actually moved. A
   // failed attempt is recorded for visibility only.

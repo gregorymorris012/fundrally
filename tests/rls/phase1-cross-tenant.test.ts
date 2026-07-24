@@ -24,9 +24,9 @@ describe("Phase 1 cross-tenant RLS isolation", () => {
   let transactionAId: string;
 
   beforeAll(async () => {
-    userA = await signInTestUser(0);
-    userB = await signInTestUser(1);
-    volunteer = await signInTestUser(2);
+    userA = await signInTestUser(2);
+    userB = await signInTestUser(3);
+    volunteer = await signInTestUser(4);
 
     const suffix = randomUUID().slice(0, 8);
     const orgA = await createTestOrgWithFundraiser(userA, `a-${suffix}`);

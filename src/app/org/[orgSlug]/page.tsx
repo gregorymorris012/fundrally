@@ -127,12 +127,20 @@ export default async function OrgDashboardPage({
                 <span>
                   {f.title} <span className="text-muted-foreground">({f.status})</span>
                 </span>
-                <Link
-                  href={`/donate/${org.slug}/${f.slug}`}
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  Donate page
-                </Link>
+                <div className="flex gap-2">
+                  <Link
+                    href={`/org/${org.slug}/fundraisers/${f.slug}`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Manage
+                  </Link>
+                  <Link
+                    href={`/donate/${org.slug}/${f.slug}`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Donate page
+                  </Link>
+                </div>
               </div>
             ))
           ) : (

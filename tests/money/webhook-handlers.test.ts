@@ -24,7 +24,7 @@ describe("Stripe webhook processing", () => {
   const chargeId = `ch_test_${runId}`;
 
   beforeAll(async () => {
-    const owner = await signInTestUser(0);
+    const owner = await signInTestUser(8);
     const org = await createTestOrgWithFundraiser(owner, `money-${randomUUID().slice(0, 8)}`);
     orgId = org.orgId;
     fundraiserId = org.fundraiserId;
