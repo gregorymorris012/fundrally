@@ -19,10 +19,14 @@ charitable funds or touches card data (Stripe Connect direct charges only),
 and every fundraiser format must be independently enable-able per tenant
 (gaming law varies by state — see `module_availability` in the spec).
 
-Currently implemented: **Phase 0 only** — auth, `organizations`,
-`memberships`, and RLS. No fundraiser modules, no payments, no money spine
-yet. Don't assume later-phase tables (`transactions`, `draws`, `modules`,
-etc.) exist; check `db/schema/` before referencing them.
+Currently implemented: **Phase 0 (auth, `organizations`, `memberships`,
+RLS) and Phase 1 (Stripe Connect onboarding, PaymentIntents, webhook
+handler, `transactions` ledger, refunds)**. No fundraiser modules yet
+(auction, wheel, product, squares, 50/50, golf, item raffle) — the only
+money-moving flow is a trivial direct donation, which exists specifically
+to prove the payment spine end-to-end. Don't assume later-phase tables
+(`draws`, `modules`, `module_availability`, `compliance_records`, etc.)
+exist; check `db/schema/` before referencing them.
 
 ## Commands
 
@@ -42,12 +46,18 @@ npm run db:studio          # drizzle-kit studio
 
 npm test                   # vitest run (all tests)
 npm run test:rls           # vitest run tests/rls — the mandatory cross-tenant suite
+npm run test:money         # vitest run tests/money — webhook processing paths
 ```
 
 Local dev setup: `supabase start`, then copy the printed `API URL`, `anon
 key`, and `service_role key` into `.env.local` (see `.env.example` for the
 exact variable names and default local ports). `DATABASE_URL` points at
 Postgres directly (port 54322 by default), not the Supabase API.
+
+For Phase 1 payments locally, also set the `STRIPE_*` / `NEXT_PUBLIC_STRIPE_*`
+vars in `.env.example` (test-mode values from dashboard.stripe.com), and run
+`stripe listen --forward-to localhost:3000/api/webhooks/stripe` to get a
+`STRIPE_WEBHOOK_SECRET` and forward events during local testing.
 
 To run a single test file: `npx vitest run tests/rls/cross-tenant.test.ts`.
 
@@ -103,17 +113,67 @@ policies live alongside the functions they depend on rather than split
 across two authoring paths). If you add a table, follow the same split:
 columns via Drizzle, policies via a `drizzle-kit generate --custom` file.
 
+### Money spine (Phase 1)
+
+The donate flow is: organizer creates an org → connects Stripe (Connect
+Standard, OAuth — `src/app/org/[orgSlug]/stripe/connect|callback/route.ts`)
+→ creates a fundraiser (`src/lib/fundraisers.ts`, plain RLS INSERT policy
+gated to owner/admin — unlike org creation there's no bootstrapping
+problem here, so no RPC is needed) → guest hits the public donate page
+(`src/app/donate/[orgSlug]/[fundraiserSlug]/page.tsx`) → Stripe Elements
+confirms the payment client-side (card data never reaches our server) →
+the webhook writes the ledger row.
+
+**`src/lib/payments/webhook-handlers.ts` is the only place `transactions`
+rows get written** (rule 3) — not the route handler, and not the
+PaymentIntent-creation action. This split exists so the processing logic
+can be tested directly against a real database with a fabricated Stripe
+event (`tests/money/webhook-handlers.test.ts`), without a live Stripe API
+or a running server. `src/app/api/webhooks/stripe/route.ts` is a thin
+wrapper: verify the signature, call `processStripeEvent()`. Idempotency is
+by Stripe event id (`stripe_webhook_events`, upsert + `ignoreDuplicates`) —
+**event ids must be unique per test run**, since that table is never reset
+between runs and a reused id is (correctly) treated as an already-processed
+duplicate and silently skipped; see the `runId` suffix pattern in the money
+tests.
+
+Refunds are server-initiated only (`src/lib/payments/refund.ts`): it calls
+`stripe.refunds.create` and writes an audit row for the *initiation*, but
+the negative `transactions` row itself still comes from the
+`charge.refunded` webhook, never from the action directly — same rule-3
+reasoning. Never edit an original transaction row to reflect a refund or
+dispute; both are separate rows/audit entries.
+
+Guest checkout has no Supabase Auth session, so `participants` rows are
+written via the service-role client (`src/lib/supabase/service.ts`) inside
+the trusted `createDonationIntent` server action — there is no client-side
+INSERT policy on `participants` at all, matching the "guest checkout must
+work without an account" requirement. The one deliberate public RLS
+exception in this codebase is in `db/migrations/0005_public_donate_policies.sql`:
+`anon` can read `fundraisers` where `status = 'active'` and the parent
+`organizations` row, because the donate page has to render for signed-out
+visitors. Nothing exposed there is sensitive — a Stripe *account id*
+(`acct_...`) is routinely used client-side, unlike an API key.
+
+The platform fee is one constant: `PLATFORM_FEE_BPS` in
+`src/lib/stripe/fees.ts`, currently `0`. Change that value when pricing is
+decided; nothing else needs to move.
+
 ### RLS testing
 
-`tests/rls/cross-tenant.test.ts` is the template every future table's RLS
-test should follow: sign in two real users via the phone-OTP test flow
-(`[auth.sms.test_otp]` in `supabase/config.toml` — fixed OTP codes for local
-dev, no live Twilio needed), have each create their own org via
-`create_organization()`, then assert user A cannot read, list, update,
-delete, or insert into user B's rows — checking the *actual database state*
-via a service-role client afterward, not just the client response shape.
-CI (`.github/workflows/ci.yml`) runs this suite on every push/PR and treats
-a failure as a merge blocker, per build spec section 9.
+`tests/rls/cross-tenant.test.ts` (org/membership tables) and
+`tests/rls/phase1-cross-tenant.test.ts` (fundraisers/participants/
+transactions/audit_log, plus the intentional anon-read exception above) are
+the templates every future table's RLS test should follow: sign in real
+users via the phone-OTP test flow (`[auth.sms.test_otp]` in
+`supabase/config.toml` — fixed OTP codes for local dev, no live Twilio
+needed; `tests/helpers.ts` has the shared `signInTestUser()` /
+`createTestOrgWithFundraiser()` fixtures), then assert one tenant cannot
+read, list, update, delete, or insert into another tenant's rows —
+checking the *actual database state* via a service-role client afterward,
+not just the client response shape. CI (`.github/workflows/ci.yml`) runs
+both this suite and `test:money` on every push/PR and treats a failure as
+a merge blocker, per build spec section 9.
 
 ### Local Supabase gotchas (verified empirically, not documented by Supabase)
 
@@ -139,16 +199,44 @@ a failure as a merge blocker, per build spec section 9.
   Not needed for anything built so far — re-enable only if you have a
   concrete reason to inspect local log aggregation.
 
+### Build/deploy gotchas (verified empirically)
+
+- **Never construct an SDK client eagerly at module scope if it needs an
+  env var.** `new Stripe(process.env.STRIPE_SECRET_KEY!)` at the top of
+  `src/lib/stripe/client.ts` crashed `next build` during "Collecting page
+  data" the first time this was deployed to a freshly-linked Vercel
+  project (no env vars configured yet) — Next.js evaluates route/action
+  modules at build time, before runtime env vars exist. Fixed by
+  constructing lazily on first use (`getStripe()`); `db/client.ts` has the
+  same latent risk if anything ever imports it directly (currently
+  nothing does — app code goes through `src/lib/supabase/*` instead, see
+  below).
+- **`import "server-only"` breaks direct unit testing under Vitest.** The
+  package's marker only no-ops under Next.js's "react-server" bundler
+  condition; in plain Node it unconditionally throws. That's why
+  `webhook-handlers.ts` — which `tests/money/` imports directly — does not
+  have that import, even though every other server-only module in this
+  repo does. Don't add it there.
+- **App code never imports `db/client.ts`.** Despite it existing (for
+  potential future scripts/seeding), all reads/writes go through
+  `src/lib/supabase/{client,server,service}.ts` — an RLS-scoped
+  `@supabase/ssr` client for anything user-facing, the service-role client
+  only for the specific writes that have no client policy by design
+  (`participants`, `transactions`, `audit_log`, `stripe_webhook_events`,
+  and `organizations` updates like the Stripe callback / webhook). This
+  avoids running a persistent `postgres.js` connection inside serverless
+  functions, which doesn't pool well on Vercel without something like
+  Supavisor in front of it.
+
 ### Build phases
 
 The build spec (section 8) sequences work as: Phase 0 foundation (done) →
-Phase 1 money spine (Stripe Connect, PaymentIntents, webhook handler,
-ledger) → Phase 2 first module (product sales) → Phase 3 reporting/payouts
-→ Phase 4 compliance gating → Phase 5 auction → Phase 6 chance modules →
-Phase 7 golf → Phase 8 comms/sponsors. Don't jump ahead — e.g. don't build
-chance-module UI before `module_availability` gating exists (Phase 4), and
-don't write to a `transactions` table that doesn't exist yet without first
-checking `db/schema/`.
+Phase 1 money spine (done) → Phase 2 first module (product/cookie sale) →
+Phase 3 reporting/payouts → Phase 4 compliance gating → Phase 5 auction →
+Phase 6 chance modules → Phase 7 golf → Phase 8 comms/sponsors. Don't jump
+ahead — e.g. don't build chance-module UI before `module_availability`
+gating exists (Phase 4), and don't assume a `modules` table exists without
+checking `db/schema/` (Phase 2 is what introduces it).
 
 ### Base UI note
 
