@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { serviceClient, signInTestUser } from "./helpers";
+import { serviceClient, signInTestUser } from "../helpers";
 
 // Asserts the invariant from FundRally-Build-Spec.md section 9: a user who
 // belongs to org A must not be able to read, write, or update org B's rows,

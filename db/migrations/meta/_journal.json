@@ -22,6 +22,27 @@
       "when": 1784909734751,
       "tag": "0002_grants",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784910242804,
+      "tag": "0003_needy_blade",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784910298885,
+      "tag": "0004_phase1_policies",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784910673797,
+      "tag": "0005_public_donate_policies",
+      "breakpoints": true
     }
   ]
 }

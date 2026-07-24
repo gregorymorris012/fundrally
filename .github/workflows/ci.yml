@@ -44,6 +44,11 @@ jobs:
       - name: Run RLS test suite
         run: npm run test:rls
 
+      # No Stripe secrets needed: these test processStripeEvent() directly
+      # against fabricated events, never the real Stripe API.
+      - name: Run money (webhook processing) test suite
+        run: npm run test:money
+
       - name: Stop Supabase
         if: always()
         run: npx supabase stop

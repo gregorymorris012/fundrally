@@ -1,4 +1,6 @@
-import "server-only";
+"use server";
+
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 export async function createOrganization(input: {
@@ -15,4 +17,13 @@ export async function createOrganization(input: {
 
   if (error) throw error;
   return data as string;
+}
+
+export async function createOrganizationAction(formData: FormData) {
+  const name = String(formData.get("name"));
+  const slug = String(formData.get("slug"));
+  const stateCode = String(formData.get("stateCode"));
+
+  await createOrganization({ name, slug, stateCode });
+  redirect(`/org/${slug}`);
 }
