@@ -15,6 +15,13 @@
       "when": 1784829160264,
       "tag": "0001_rls_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784909734751,
+      "tag": "0002_grants",
+      "breakpoints": true
     }
   ]
 }

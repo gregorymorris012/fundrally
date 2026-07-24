@@ -115,6 +115,30 @@ via a service-role client afterward, not just the client response shape.
 CI (`.github/workflows/ci.yml`) runs this suite on every push/PR and treats
 a failure as a merge blocker, per build spec section 9.
 
+### Local Supabase gotchas (verified empirically, not documented by Supabase)
+
+- **Every new table needs an explicit `GRANT` in a migration, even with RLS
+  policies in place.** Drizzle Kit applies migrations by connecting directly
+  as `postgres`, which — unlike tables created through Supabase's own
+  migration path — does *not* pick up Supabase's usual default privileges
+  for `anon`/`authenticated`/`service_role`. Without a `GRANT`, every query
+  fails with `permission denied for table X`, regardless of RLS; RLS only
+  filters rows once a role already has the base object privilege. See
+  `db/migrations/0002_grants.sql` for the pattern (`authenticated` gets
+  exactly what its policies allow; `service_role` gets full CRUD since
+  `BYPASSRLS` alone doesn't grant object access).
+- **`[auth.sms.test_otp]` alone does not enable phone sign-in.** gotrue
+  returns `400 phone_provider_disabled` unless some SMS provider block
+  (`[auth.sms.twilio]` here) has `enabled = true` — the test_otp map is only
+  consulted once phone auth is active. Local config enables the Twilio
+  block with placeholder credentials that are never actually called, since
+  every phone number used locally is in `test_otp`.
+- **`[analytics]` is disabled in `supabase/config.toml`.** The local
+  logflare/vector containers it spins up failed their health checks in this
+  environment and caused `supabase start` to roll back the entire stack.
+  Not needed for anything built so far — re-enable only if you have a
+  concrete reason to inspect local log aggregation.
+
 ### Build phases
 
 The build spec (section 8) sequences work as: Phase 0 foundation (done) →

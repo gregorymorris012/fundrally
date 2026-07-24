@@ -289,10 +289,21 @@ max_frequency = "5s"
 # uri = "pg-functions://<database>/<schema>/<hook_name>"
 
 # Configure one of the supported SMS providers: `twilio`, `twilio_verify`, `messagebird`, `textlocal`, `vonage`.
+#
+# `enabled = true` here is required for gotrue to accept phone sign-ins at
+# all (verified: with this false, /auth/v1/otp returns 400
+# phone_provider_disabled even for numbers listed in [auth.sms.test_otp]
+# above — the test_otp map is consulted, but only once phone auth is
+# active). No real Twilio account is needed locally: every phone number
+# used in dev/tests is one of the test_otp numbers, which gotrue intercepts
+# before ever calling out to Twilio. Production must set real
+# account_sid/message_service_sid here and
+# SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN in the environment (10DLC
+# registration — build spec section 2).
 [auth.sms.twilio]
-enabled = false
-account_sid = ""
-message_service_sid = ""
+enabled = true
+account_sid = "AC0000000000000000000000000000000local"
+message_service_sid = "MG0000000000000000000000000000000local"
 # DO NOT commit your Twilio auth token to git. Use environment variable substitution instead:
 auth_token = "env(SUPABASE_AUTH_SMS_TWILIO_AUTH_TOKEN)"
 
@@ -389,7 +400,10 @@ deno_version = 2
 # secret_key = "env(SECRET_VALUE)"
 
 [analytics]
-enabled = true
+# Disabled for local dev: the logflare/vector containers this backs were
+# flaking on health checks (unrelated to app code) and Phase 0 doesn't need
+# log aggregation. Revisit if we adopt PostHog/Sentry locally later.
+enabled = false
 port = 54327
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"
