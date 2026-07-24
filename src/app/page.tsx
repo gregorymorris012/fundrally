@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { buttonVariants } from "@/components/ui/button";
+import { Logo } from "@/components/logo";
 
 export default async function Home() {
   const supabase = await createClient();
@@ -11,6 +12,7 @@ export default async function Home() {
   if (!user) {
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-4">
+        <Logo size={160} />
         <Link href="/auth/sign-in" className={buttonVariants()}>
           Sign in
         </Link>
@@ -24,12 +26,13 @@ export default async function Home() {
     .eq("user_id", user.id);
 
   return (
-    <div className="mx-auto flex min-h-svh max-w-sm flex-col gap-4 p-6">
+    <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center gap-4 p-6">
+      <Logo size={96} />
       <p className="text-sm text-muted-foreground">
         Signed in as {user.email ?? user.phone}.
       </p>
 
-      <div className="space-y-2">
+      <div className="w-full space-y-2">
         {memberships?.length ? (
           memberships.map((m) => {
             const org = Array.isArray(m.organizations)
