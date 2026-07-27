@@ -26,10 +26,6 @@ export default async function NewOrgPage() {
               <Input id="name" name="name" required />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="slug">Slug</Label>
-              <Input id="slug" name="slug" required pattern="[a-z0-9-]+" />
-            </div>
-            <div className="space-y-1.5">
               <Label htmlFor="stateCode">State (2-letter)</Label>
               <Input id="stateCode" name="stateCode" required maxLength={2} />
             </div>
