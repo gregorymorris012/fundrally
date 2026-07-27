@@ -4,6 +4,7 @@ import { CircleCheck, TriangleAlert, CircleX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createFundraiser } from "@/lib/fundraisers";
 import { refundTransaction } from "@/lib/payments/refund";
+import { signOutAction } from "@/lib/auth";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -93,12 +94,19 @@ export default async function OrgDashboardPage({
             {org.name}
           </h1>
         </div>
-        <Link
-          href="/"
-          className={buttonVariants({ variant: "ghost", size: "sm" })}
-        >
-          Switch organization
-        </Link>
+        <div className="flex items-center gap-1">
+          <Link
+            href="/"
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+          >
+            Switch organization
+          </Link>
+          <form action={signOutAction}>
+            <Button type="submit" variant="ghost" size="sm">
+              Sign out
+            </Button>
+          </form>
+        </div>
       </div>
 
       {stripe_connected && (
