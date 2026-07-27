@@ -1,6 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { buttonVariants } from "@/components/ui/button";
+import { signOutAction } from "@/lib/auth";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
 
 export default async function Home() {
@@ -34,33 +36,39 @@ export default async function Home() {
     .select("role, organizations(id, name, slug)")
     .eq("user_id", user.id);
 
+  // First-run: send brand-new users through the onboarding wizard instead
+  // of a bare "No organizations yet." Returning users with at least one
+  // org keep the plain switcher below.
+  if (!memberships?.length) redirect("/onboarding");
+
   return (
     <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center gap-4 p-6">
       <Logo size={96} />
       <p className="text-sm text-muted-foreground">
         Signed in as {user.email ?? user.phone}.
       </p>
+      <form action={signOutAction}>
+        <Button type="submit" variant="ghost" size="sm">
+          Sign out
+        </Button>
+      </form>
 
       <div className="w-full space-y-2">
-        {memberships?.length ? (
-          memberships.map((m) => {
-            const org = Array.isArray(m.organizations)
-              ? m.organizations[0]
-              : m.organizations;
-            if (!org) return null;
-            return (
-              <Link
-                key={org.id}
-                href={`/org/${org.slug}`}
-                className={buttonVariants({ variant: "outline", className: "w-full justify-start" })}
-              >
-                {org.name}
-              </Link>
-            );
-          })
-        ) : (
-          <p className="text-sm text-muted-foreground">No organizations yet.</p>
-        )}
+        {memberships.map((m) => {
+          const org = Array.isArray(m.organizations)
+            ? m.organizations[0]
+            : m.organizations;
+          if (!org) return null;
+          return (
+            <Link
+              key={org.id}
+              href={`/org/${org.slug}`}
+              className={buttonVariants({ variant: "outline", className: "w-full justify-start" })}
+            >
+              {org.name}
+            </Link>
+          );
+        })}
       </div>
 
       <Link href="/org/new" className={buttonVariants()}>

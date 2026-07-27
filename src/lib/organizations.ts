@@ -27,21 +27,31 @@ function slugify(value: string) {
 }
 
 // Postgres unique_violation — organizations.slug has a unique constraint
-// and this form never shows the slug to the organizer (it's derived from
-// the name, not typed in), so a collision has to be resolved automatically
-// rather than surfaced as something for them to fix.
+// and neither the plain nor onboarding form shows the slug to the
+// organizer (it's derived from the name, not typed in), so a collision
+// has to be resolved automatically rather than surfaced as something for
+// them to fix.
 const UNIQUE_VIOLATION = "23505";
 
-export async function createOrganizationAction(formData: FormData) {
-  const name = String(formData.get("name"));
-  const stateCode = String(formData.get("stateCode"));
-  const baseSlug = slugify(name) || "org";
+// Shared by createOrganizationAction (plain "/org/new" form) and the
+// onboarding wizard's organization step — both just need "create an org
+// from a name/state, picking a free slug" and differ only in where they
+// redirect afterward.
+export async function createOrganizationWithUniqueSlug(input: {
+  name: string;
+  stateCode: string;
+}) {
+  const baseSlug = slugify(input.name) || "org";
 
   let slug = baseSlug;
   for (let attempt = 0; ; attempt++) {
     try {
-      await createOrganization({ name, slug, stateCode });
-      break;
+      const id = await createOrganization({
+        name: input.name,
+        slug,
+        stateCode: input.stateCode,
+      });
+      return { id, slug };
     } catch (error) {
       const isSlugCollision =
         typeof error === "object" &&
@@ -52,6 +62,11 @@ export async function createOrganizationAction(formData: FormData) {
       slug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
     }
   }
+}
 
+export async function createOrganizationAction(formData: FormData) {
+  const name = String(formData.get("name"));
+  const stateCode = String(formData.get("stateCode"));
+  const { slug } = await createOrganizationWithUniqueSlug({ name, stateCode });
   redirect(`/org/${slug}`);
 }

@@ -22,26 +22,35 @@ function slugify(value: string) {
 // fix. Same pattern as createOrganizationAction in lib/organizations.ts.
 const UNIQUE_VIOLATION = "23505";
 
-export async function createFundraiser(formData: FormData) {
-  const orgId = String(formData.get("orgId"));
-  const orgSlug = String(formData.get("orgSlug"));
-  const title = String(formData.get("title"));
-  const baseSlug = slugify(title) || "fundraiser";
-
+// Shared by createFundraiser (org dashboard form) and the onboarding
+// wizard's fundraiser-type step — both just need "create a fundraiser
+// from a title, picking a free slug" and differ in what happens after.
+export async function createFundraiserWithUniqueSlug(input: {
+  orgId: string;
+  title: string;
+}) {
+  const baseSlug = slugify(input.title) || "fundraiser";
   const supabase = await createClient();
 
   let slug = baseSlug;
   for (let attempt = 0; ; attempt++) {
-    const { error } = await supabase.from("fundraisers").insert({
-      org_id: orgId,
-      title,
-      slug,
-      status: "active",
-    });
-    if (!error) break;
+    const { data, error } = await supabase
+      .from("fundraisers")
+      .insert({ org_id: input.orgId, title: input.title, slug, status: "active" })
+      .select("id, slug")
+      .single();
+    if (!error) return data;
     if (error.code !== UNIQUE_VIOLATION || attempt >= 4) throw error;
     slug = `${baseSlug}-${Math.random().toString(36).slice(2, 6)}`;
   }
+}
+
+export async function createFundraiser(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const title = String(formData.get("title"));
+
+  await createFundraiserWithUniqueSlug({ orgId, title });
 
   revalidatePath(`/org/${orgSlug}`);
 }
