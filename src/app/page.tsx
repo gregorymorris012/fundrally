@@ -11,10 +11,19 @@ export default async function Home() {
 
   if (!user) {
     return (
-      <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-4">
-        <Logo size={160} />
-        <Link href="/auth/sign-in" className={buttonVariants()}>
-          Sign in
+      <div className="flex min-h-svh flex-col items-center justify-center gap-8 p-6 text-center">
+        <Logo size={140} />
+        <div className="max-w-sm space-y-3">
+          <h1 className="font-heading text-4xl font-bold text-foreground">
+            Start Fundraising the Right Way
+          </h1>
+          <p className="text-muted-foreground">
+            Auctions, raffles, shop sales, and more — all in one place, built
+            for teams and communities.
+          </p>
+        </div>
+        <Link href="/auth/sign-in" className={buttonVariants({ size: "lg" })}>
+          Get started
         </Link>
       </div>
     );

@@ -278,6 +278,12 @@ max_frequency = "5s"
 15005550008 = "123456"
 15005550009 = "123456"
 15005550010 = "123456"
+# Reserved for the sign-in page's dev-only "Test login" button
+# (src/components/auth/sign-in-form.tsx) — deliberately its own number,
+# never one of the 0001-0010 slice tests/helpers.ts's TEST_PHONES hands out
+# to test files, so a manual test login can't collide with the RLS suite's
+# 5s-per-number rate limit.
+15005550011 = "123456"
 
 # Configure logged in session timeouts.
 # [auth.sessions]
