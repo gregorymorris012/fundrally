@@ -12,13 +12,23 @@ export async function GET(
   { params }: { params: Promise<{ orgSlug: string }> },
 ) {
   const { orgSlug } = await params;
+  // request.url reports the wrong host here (always "localhost", never the
+  // real Host header) under Next.js 16 + Turbopack dev — verified
+  // empirically, not a doc'd limitation. Build the origin from the header
+  // directly so this matches whatever origin the browser actually used
+  // (127.0.0.1 locally, per the allowedDevOrigins note in next.config.ts) —
+  // otherwise the redirect_uri sent to Stripe lands on a different origin
+  // than the one holding the stripe_connect_state cookie, and the callback
+  // fails with state_mismatch.
+  const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+  const origin = `${protocol}://${request.headers.get("host")}`;
   const supabase = await createClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) {
-    return NextResponse.redirect(new URL("/auth/sign-in", request.url));
+    return NextResponse.redirect(new URL("/auth/sign-in", origin));
   }
 
   // RLS (org members can read) + explicit role check — only owners/admins
@@ -44,7 +54,7 @@ export async function GET(
 
   const state = randomUUID();
   const cookieStore = await cookies();
-  cookieStore.set("stripe_connect_state", `${state}:${org.id}`, {
+  cookieStore.set("stripe_connect_state", `${state}:${org.id}:${orgSlug}`, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
@@ -59,7 +69,8 @@ export async function GET(
   authorizeUrl.searchParams.set("state", state);
   authorizeUrl.searchParams.set(
     "redirect_uri",
-    new URL(`/org/${orgSlug}/stripe/callback`, request.url).toString(),
+    // Fixed path, no dynamic segment — see connect-callback/route.ts for why.
+    new URL("/api/stripe/connect-callback", origin).toString(),
   );
 
   return NextResponse.redirect(authorizeUrl);
