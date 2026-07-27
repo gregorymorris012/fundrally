@@ -1,17 +1,42 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { CircleCheck, TriangleAlert, CircleX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createFundraiser } from "@/lib/fundraisers";
 import { refundTransaction } from "@/lib/payments/refund";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Logo } from "@/components/logo";
+
+const fundraiserStatusVariant = {
+  active: "success",
+  draft: "secondary",
+  closed: "outline",
+} as const;
+
+const transactionStatusVariant = {
+  succeeded: "success",
+  failed: "destructive",
+  refunded: "secondary",
+  disputed: "warning",
+} as const;
 
 export default async function OrgDashboardPage({
   params,
@@ -61,15 +86,33 @@ export default async function OrgDashboardPage({
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
-      <h1 className="text-2xl font-semibold">{org.name}</h1>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <Logo size={36} />
+          <h1 className="font-heading text-2xl font-bold text-foreground">
+            {org.name}
+          </h1>
+        </div>
+        <Link
+          href="/"
+          className={buttonVariants({ variant: "ghost", size: "sm" })}
+        >
+          Switch organization
+        </Link>
+      </div>
 
       {stripe_connected && (
-        <p className="text-sm text-emerald-600">Stripe account connected.</p>
+        <Alert variant="success">
+          <CircleCheck />
+          <AlertTitle>Stripe account connected.</AlertTitle>
+        </Alert>
       )}
       {stripe_error && (
-        <p className="text-sm text-destructive">
-          Stripe connection failed ({stripe_error}). Try again.
-        </p>
+        <Alert variant="destructive">
+          <CircleX />
+          <AlertTitle>Stripe connection failed ({stripe_error}).</AlertTitle>
+          <AlertDescription>Try again.</AlertDescription>
+        </Alert>
       )}
 
       <Card>
@@ -77,11 +120,23 @@ export default async function OrgDashboardPage({
           <CardTitle>Payments</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <p className="text-sm text-muted-foreground">
-            {org.charges_enabled
-              ? "Stripe is connected and able to accept charges."
-              : "Connect Stripe before any fundraiser can accept payments."}
-          </p>
+          {org.charges_enabled ? (
+            <Alert variant="success">
+              <CircleCheck />
+              <AlertTitle>Ready to accept charges.</AlertTitle>
+              <AlertDescription>
+                Stripe is connected for {org.name}.
+              </AlertDescription>
+            </Alert>
+          ) : (
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertTitle>Stripe isn&apos;t connected yet.</AlertTitle>
+              <AlertDescription>
+                Connect Stripe before any fundraiser can accept payments.
+              </AlertDescription>
+            </Alert>
+          )}
           {isAdmin && !org.charges_enabled && (
             <a
               className={buttonVariants()}
@@ -106,10 +161,6 @@ export default async function OrgDashboardPage({
                 <Label htmlFor="title">Title</Label>
                 <Input id="title" name="title" required />
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="slug">Slug</Label>
-                <Input id="slug" name="slug" required pattern="[a-z0-9-]+" />
-              </div>
               <Button type="submit">Create</Button>
             </form>
           </CardContent>
@@ -120,29 +171,49 @@ export default async function OrgDashboardPage({
         <CardHeader>
           <CardTitle>Fundraisers</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent>
           {fundraisers?.length ? (
-            fundraisers.map((f) => (
-              <div key={f.id} className="flex items-center justify-between">
-                <span>
-                  {f.title} <span className="text-muted-foreground">({f.status})</span>
-                </span>
-                <div className="flex gap-2">
-                  <Link
-                    href={`/org/${org.slug}/fundraisers/${f.slug}`}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
-                  >
-                    Manage
-                  </Link>
-                  <Link
-                    href={`/donate/${org.slug}/${f.slug}`}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
-                  >
-                    Donate page
-                  </Link>
-                </div>
-              </div>
-            ))
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {fundraisers.map((f) => (
+                  <TableRow key={f.id}>
+                    <TableCell className="font-medium">{f.title}</TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          fundraiserStatusVariant[
+                            f.status as keyof typeof fundraiserStatusVariant
+                          ]
+                        }
+                      >
+                        {f.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="flex justify-end gap-2">
+                      <Link
+                        href={`/org/${org.slug}/fundraisers/${f.slug}`}
+                        className={buttonVariants({ variant: "outline", size: "sm" })}
+                      >
+                        Manage
+                      </Link>
+                      <Link
+                        href={`/donate/${org.slug}/${f.slug}`}
+                        className={buttonVariants({ variant: "outline", size: "sm" })}
+                      >
+                        Donate page
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           ) : (
             <p className="text-sm text-muted-foreground">No fundraisers yet.</p>
           )}
@@ -153,23 +224,54 @@ export default async function OrgDashboardPage({
         <CardHeader>
           <CardTitle>Transactions</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent>
           {transactions?.length ? (
-            transactions.map((t) => (
-              <div key={t.id} className="flex items-center justify-between text-sm">
-                <span>
-                  {t.kind} — {(t.gross_cents / 100).toFixed(2)} {t.currency.toUpperCase()}{" "}
-                  <span className="text-muted-foreground">({t.status})</span>
-                </span>
-                {isAdmin && t.kind === "donation" && t.status === "succeeded" && (
-                  <form action={refundTransaction.bind(null, t.id)}>
-                    <Button type="submit" variant="outline" size="sm">
-                      Refund
-                    </Button>
-                  </form>
-                )}
-              </div>
-            ))
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Kind</TableHead>
+                  <TableHead>Amount</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {transactions.map((t) => (
+                  <TableRow key={t.id}>
+                    <TableCell>
+                      <Badge variant="outline">{t.kind}</Badge>
+                    </TableCell>
+                    <TableCell className="font-mono">
+                      {(t.gross_cents / 100).toFixed(2)} {t.currency.toUpperCase()}
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        variant={
+                          transactionStatusVariant[
+                            t.status as keyof typeof transactionStatusVariant
+                          ]
+                        }
+                      >
+                        {t.status}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(t.created_at).toLocaleDateString()}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {isAdmin && t.kind === "donation" && t.status === "succeeded" && (
+                        <form action={refundTransaction.bind(null, t.id)}>
+                          <Button type="submit" variant="outline" size="sm">
+                            Refund
+                          </Button>
+                        </form>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           ) : (
             <p className="text-sm text-muted-foreground">No transactions yet.</p>
           )}

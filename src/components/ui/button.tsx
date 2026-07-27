@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 
-const buttonVariants = cva(
+const buttonVariantsCva = cva(
   "group/button inline-flex shrink-0 items-center justify-center rounded-lg border border-transparent bg-clip-padding text-sm font-medium whitespace-nowrap transition-all outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 active:not-aria-[haspopup]:translate-y-px disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
@@ -40,16 +40,28 @@ const buttonVariants = cva(
   }
 )
 
+// cva concatenates base + variant classes without deduping conflicting
+// utilities (e.g. base's `border-transparent` vs outline's `border-border`)
+// — raw cva output can silently lose a variant's override depending on
+// Tailwind's generated stylesheet order. Route through cn() (tailwind-merge)
+// so buttonVariants() is safe to use directly on non-Button elements too
+// (see the Base UI note in CLAUDE.md: links render via buttonVariants(),
+// not the Button component's `render` prop).
+function buttonVariants(...args: Parameters<typeof buttonVariantsCva>) {
+  return cn(buttonVariantsCva(...args))
+}
+
 function Button({
   className,
   variant = "default",
   size = "default",
   ...props
-}: ButtonPrimitive.Props & VariantProps<typeof buttonVariants>) {
+}: Omit<ButtonPrimitive.Props, "className"> &
+  VariantProps<typeof buttonVariantsCva> & { className?: string }) {
   return (
     <ButtonPrimitive
       data-slot="button"
-      className={cn(buttonVariants({ variant, size, className }))}
+      className={buttonVariants({ variant, size, className })}
       {...props}
     />
   )

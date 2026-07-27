@@ -74,7 +74,9 @@ export default async function FundraiserAdminPage({
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-6 p-6">
       <div>
-        <h1 className="text-2xl font-semibold">{fundraiser.title}</h1>
+        <h1 className="font-heading text-2xl font-bold text-foreground">
+          {fundraiser.title}
+        </h1>
         <Link href={`/org/${orgSlug}`} className="text-sm text-muted-foreground underline">
           Back to organization
         </Link>
