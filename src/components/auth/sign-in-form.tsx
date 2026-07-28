@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { testLoginAction } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,15 +20,13 @@ import {
 type Method = "email" | "phone";
 type Stage = "request" | "verify";
 
-// Dev-only one-click sign-in against a Supabase test_otp number (see
-// supabase/config.toml) — a real auth session through the real phone-OTP
-// flow, not a bypass, so RLS still applies exactly as it would for any
-// other user. process.env.NODE_ENV is inlined at build time, so this
-// entire branch (and the button below) is dead-code-eliminated from the
-// production bundle — it cannot render or run once deployed.
-const TEST_LOGIN_PHONE = "+15005550011";
-const TEST_LOGIN_OTP = "123456";
-const TEST_LOGIN_ENABLED = process.env.NODE_ENV !== "production";
+// Mirrors the server-side check in lib/auth.ts's testLoginAction — this
+// one only controls whether the button renders; the action re-validates
+// independently since a client-only check can't be trusted to gate an
+// action that establishes a real session.
+const TEST_LOGIN_ENABLED =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_ENABLE_TEST_LOGIN === "true";
 
 export function SignInForm() {
   const router = useRouter();
@@ -90,34 +89,6 @@ export function SignInForm() {
     setLoading(false);
     if (error) {
       setError(error.message);
-      return;
-    }
-    router.push("/");
-    router.refresh();
-  }
-
-  async function handleTestLogin() {
-    setLoading(true);
-    setError(null);
-
-    const { error: otpError } = await supabase.auth.signInWithOtp({
-      phone: TEST_LOGIN_PHONE,
-    });
-    if (otpError) {
-      setLoading(false);
-      setError(otpError.message);
-      return;
-    }
-
-    const { error: verifyError } = await supabase.auth.verifyOtp({
-      phone: TEST_LOGIN_PHONE,
-      token: TEST_LOGIN_OTP,
-      type: "sms",
-    });
-
-    setLoading(false);
-    if (verifyError) {
-      setError(verifyError.message);
       return;
     }
     router.push("/");
@@ -226,21 +197,15 @@ export function SignInForm() {
         {TEST_LOGIN_ENABLED && (
           <>
             <Separator />
-            <div className="space-y-1.5">
-              <Button
-                type="button"
-                variant="secondary"
-                disabled={loading}
-                onClick={handleTestLogin}
-                className="w-full"
-              >
+            <form className="space-y-1.5" action={testLoginAction}>
+              <Button type="submit" variant="secondary" className="w-full">
                 Test login <Badge variant="warning">DEV</Badge>
               </Button>
               <p className="text-xs text-muted-foreground">
-                Local/dev only — signs in with a Supabase test_otp number,
-                not a real phone or email.
+                Testing only — signs in as a dedicated test account, not a
+                real phone or email.
               </p>
-            </div>
+            </form>
           </>
         )}
       </CardContent>
