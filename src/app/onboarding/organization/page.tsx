@@ -16,7 +16,7 @@ export default async function OnboardingOrganizationPage() {
 
   return (
     <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center justify-center gap-6 p-6">
-      <Logo size={80} />
+      <Logo size={120} />
       <Card className="w-full">
         <CardHeader>
           <CardTitle>What&apos;s your organization&apos;s name?</CardTitle>

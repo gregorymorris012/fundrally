@@ -20,7 +20,7 @@ export default async function OnboardingJoinPage() {
 
   return (
     <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center justify-center gap-6 p-6 text-center">
-      <Logo size={100} />
+      <Logo size={150} />
       <Sparkles className="size-8 text-primary" />
       <div className="space-y-2">
         <h1 className="font-heading text-2xl font-bold text-foreground">

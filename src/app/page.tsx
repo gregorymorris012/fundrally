@@ -14,7 +14,7 @@ export default async function Home() {
   if (!user) {
     return (
       <div className="flex min-h-svh flex-col items-center justify-center gap-8 p-6 text-center">
-        <Logo size={140} />
+        <Logo size={210} />
         <div className="max-w-sm space-y-3">
           <h1 className="font-heading text-4xl font-bold text-foreground">
             Start Fundraising the Right Way
@@ -43,7 +43,7 @@ export default async function Home() {
 
   return (
     <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center gap-4 p-6">
-      <Logo size={96} />
+      <Logo size={144} />
       <p className="text-sm text-muted-foreground">
         Signed in as {user.email ?? user.phone}.
       </p>

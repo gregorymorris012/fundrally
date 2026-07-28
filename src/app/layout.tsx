@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono, Baloo_2 } from "next/font/google";
 import "./globals.css";
 
@@ -25,6 +25,14 @@ const baloo = Baloo_2({
 export const metadata: Metadata = {
   title: "FundRally",
   description: "Fundraising + fun. All in one.",
+  appleWebApp: {
+    title: "FundRally",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#fa7800",
 };
 
 export default function RootLayout({

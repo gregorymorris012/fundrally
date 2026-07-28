@@ -66,7 +66,7 @@ export default async function OnboardingFundraiserTypePage({
 
   return (
     <div className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-8 p-6 text-center">
-      <Logo size={80} />
+      <Logo size={120} />
       <div className="space-y-2">
         <h1 className="font-heading text-3xl font-bold text-foreground">
           What type of fundraiser would you like to start?
