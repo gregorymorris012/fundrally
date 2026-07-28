@@ -20,7 +20,13 @@ export async function signOutAction() {
 // verifies it — a real session through real Supabase Auth, same as any
 // other sign-in, just without an email ever actually being sent, so it
 // doesn't touch the 2/hour default-mailer rate limit either.
-const TEST_LOGIN_EMAIL = "test-login@fundrally.test";
+//
+// Each click creates a brand-new account (random suffix) rather than
+// reusing one fixed email: a shared Preview link means multiple people
+// testing at once, and a fixed account meant only the first person ever
+// saw the zero-orgs onboarding flow — everyone after them inherited
+// whatever org that first person created. Random-per-click means every
+// tester independently gets the real first-run experience.
 const TEST_LOGIN_ENABLED =
   process.env.NODE_ENV !== "production" ||
   process.env.NEXT_PUBLIC_ENABLE_TEST_LOGIN === "true";
@@ -30,10 +36,11 @@ export async function testLoginAction() {
     throw new Error("Test login is disabled in this environment.");
   }
 
+  const email = `test-${Math.random().toString(36).slice(2, 10)}@fundrally.test`;
   const admin = createServiceClient();
   const { data, error } = await admin.auth.admin.generateLink({
     type: "magiclink",
-    email: TEST_LOGIN_EMAIL,
+    email,
   });
   if (error || !data.properties?.hashed_token) {
     throw error ?? new Error("Failed to generate test login link.");
