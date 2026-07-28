@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { buttonVariants } from "@/components/ui/button";
+import { signOutAction } from "@/lib/auth";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Logo } from "@/components/logo";
 
 // Placeholder: there's no way yet for a user to join an existing
@@ -19,7 +20,12 @@ export default async function OnboardingJoinPage() {
   if (!user) redirect("/auth/sign-in");
 
   return (
-    <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center justify-center gap-6 p-6 text-center">
+    <div className="relative mx-auto flex min-h-svh max-w-sm flex-col items-center justify-center gap-6 p-6 text-center">
+      <form action={signOutAction} className="absolute top-4 right-4">
+        <Button type="submit" variant="ghost" size="sm">
+          Sign out
+        </Button>
+      </form>
       <Logo size={150} />
       <Sparkles className="size-8 text-primary" />
       <div className="space-y-2">

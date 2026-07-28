@@ -1,6 +1,7 @@
 import { notFound, redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createShopFundraiserOnboardingAction } from "@/lib/onboarding";
+import { signOutAction } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,7 +38,12 @@ export default async function OnboardingShopFundraiserPage({
   if (!membership) notFound();
 
   return (
-    <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center justify-center gap-6 p-6">
+    <div className="relative mx-auto flex min-h-svh max-w-sm flex-col items-center justify-center gap-6 p-6">
+      <form action={signOutAction} className="absolute top-4 right-4">
+        <Button type="submit" variant="ghost" size="sm">
+          Sign out
+        </Button>
+      </form>
       <Logo size={120} />
       <Card className="w-full">
         <CardHeader>

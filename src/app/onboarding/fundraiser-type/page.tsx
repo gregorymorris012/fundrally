@@ -10,6 +10,8 @@ import {
   Flag,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { signOutAction } from "@/lib/auth";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Logo } from "@/components/logo";
@@ -65,7 +67,12 @@ export default async function OnboardingFundraiserTypePage({
   if (!membership) notFound();
 
   return (
-    <div className="mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-8 p-6 text-center">
+    <div className="relative mx-auto flex min-h-svh max-w-md flex-col items-center justify-center gap-8 p-6 text-center">
+      <form action={signOutAction} className="absolute top-4 right-4">
+        <Button type="submit" variant="ghost" size="sm">
+          Sign out
+        </Button>
+      </form>
       <Logo size={120} />
       <div className="space-y-2">
         <h1 className="font-heading text-3xl font-bold text-foreground">
@@ -104,6 +111,13 @@ export default async function OnboardingFundraiserTypePage({
           );
         })}
       </div>
+
+      <Link
+        href={`/org/${org.slug}`}
+        className={buttonVariants({ variant: "ghost", size: "sm" })}
+      >
+        Skip for now — go to my dashboard
+      </Link>
     </div>
   );
 }
