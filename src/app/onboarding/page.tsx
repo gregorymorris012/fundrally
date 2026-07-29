@@ -44,9 +44,9 @@ export default async function OnboardingIntentPage() {
             <CardHeader className="flex items-center gap-4">
               <Building2 className="size-8 shrink-0 text-primary" />
               <div>
-                <CardTitle>Start a Fundraiser for My Organization</CardTitle>
+                <CardTitle>Start a Fundraiser</CardTitle>
                 <CardDescription>
-                  Set up your organization and launch your first fundraiser.
+                  Set up a fundraiser for a dedicated charity or organization.
                 </CardDescription>
               </div>
             </CardHeader>
@@ -58,9 +58,9 @@ export default async function OnboardingIntentPage() {
             <CardHeader className="flex items-center gap-4">
               <Users className="size-8 shrink-0 text-primary" />
               <div>
-                <CardTitle>Raise Funds for Another Organization</CardTitle>
+                <CardTitle>Join an Existing Fundraiser</CardTitle>
                 <CardDescription>
-                  Join an existing team or organization&apos;s fundraiser.
+                  Link to a fundraiser that&apos;s already been set up.
                 </CardDescription>
               </div>
             </CardHeader>

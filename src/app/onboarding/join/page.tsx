@@ -33,8 +33,8 @@ export default async function OnboardingJoinPage() {
           Coming soon
         </h1>
         <p className="text-muted-foreground">
-          Joining another organization&apos;s fundraiser isn&apos;t ready yet.
-          For now, start your own organization instead.
+          Linking to an existing fundraiser isn&apos;t ready yet. For now,
+          start a new fundraiser instead.
         </p>
       </div>
       <div className="flex gap-2">
@@ -42,7 +42,7 @@ export default async function OnboardingJoinPage() {
           Back
         </Link>
         <Link href="/onboarding/organization" className={buttonVariants()}>
-          Start my organization
+          Start a fundraiser
         </Link>
       </div>
     </div>
