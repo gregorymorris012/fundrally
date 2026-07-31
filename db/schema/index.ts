@@ -6,5 +6,6 @@ export * from "./transactions";
 export * from "./stripe-webhook-events";
 export * from "./audit-log";
 export * from "./modules";
+export * from "./module-availability";
 export * from "./products";
 export * from "./orders";

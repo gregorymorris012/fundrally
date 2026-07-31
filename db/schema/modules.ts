@@ -25,6 +25,7 @@ export const moduleStatus = pgEnum("module_status", [
   "draft",
   "active",
   "closed",
+  "paused",
 ]);
 
 // org_id is denormalized off fundraisers (same reasoning as

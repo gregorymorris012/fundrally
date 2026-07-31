@@ -64,6 +64,20 @@
       "when": 1785509998165,
       "tag": "0008_rainy_winter_soldier",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1785510555036,
+      "tag": "0009_new_golden_guardian",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1785510575297,
+      "tag": "0010_module_availability_policies",
+      "breakpoints": true
     }
   ]
 }
