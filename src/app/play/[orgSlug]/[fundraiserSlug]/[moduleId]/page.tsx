@@ -174,7 +174,7 @@ export default async function PlayModulePage({
                   {/* column team bar (top) */}
                   <div
                     style={{ gridRow: 1, gridColumn: `3 / span ${GRID_SIZE}` }}
-                    className="flex items-center justify-center overflow-hidden bg-primary px-1 text-[10px] font-bold tracking-wide text-primary-foreground uppercase"
+                    className="flex items-center justify-center overflow-hidden bg-foreground px-1 text-[10px] font-bold tracking-wide text-background uppercase"
                   >
                     {colLabel}
                   </div>
@@ -186,7 +186,7 @@ export default async function PlayModulePage({
                       gridColumn: 1,
                       writingMode: "vertical-rl",
                     }}
-                    className="flex rotate-180 items-center justify-center overflow-hidden bg-secondary px-0.5 text-[10px] font-bold tracking-wide text-secondary-foreground uppercase"
+                    className="flex rotate-180 items-center justify-center overflow-hidden bg-muted-foreground px-0.5 text-[10px] font-bold tracking-wide text-background uppercase"
                   >
                     {rowLabel}
                   </div>
