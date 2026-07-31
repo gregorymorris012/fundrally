@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { requireOrgAdmin } from "@/lib/require-org-admin";
 
 const MIN_GIFT_CENTS = 1;
 
@@ -140,26 +140,6 @@ export async function voidOfflineGiftCore(input: {
   });
 
   return adjustment as { id: string };
-}
-
-async function requireOrgAdmin(orgId: string) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) throw new Error("must be authenticated");
-
-  const { data: membership } = await supabase
-    .from("memberships")
-    .select("role")
-    .eq("org_id", orgId)
-    .eq("user_id", user.id)
-    .maybeSingle();
-  if (!membership || !["owner", "admin"].includes(membership.role)) {
-    throw new Error("forbidden");
-  }
-
-  return user.id;
 }
 
 export async function addOfflineGift(formData: FormData) {

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createProduct } from "@/lib/products";
 import { updateModuleStatus } from "@/lib/modules";
+import { drawSquares } from "@/lib/draws";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -97,6 +98,18 @@ export default async function ModuleAdminPage({
         .select("id", { count: "exact", head: true })
         .eq("module_id", module_.id)
     : { count: 0 };
+
+  const isSquares = module_.type === "squares";
+  const { data: draw } = isSquares
+    ? await supabase
+        .from("draws")
+        .select("result, created_at")
+        .eq("module_id", module_.id)
+        .maybeSingle()
+    : { data: null };
+  const drawResult = draw?.result as
+    | { rowDigits: number[]; colDigits: number[] }
+    | undefined;
 
   const { data: products } = module_.type === "product"
     ? await supabase
@@ -301,11 +314,10 @@ export default async function ModuleAdminPage({
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
               Share this link so people can join {MODULE_TYPE_LABELS[module_.type]} —
-              free demo entry, no payment. {entryCount ?? 0} joined so far.
-              Real gameplay (picking squares, ticket numbers, a spin) isn&apos;t
-              built yet; this only records who wants in. Log any real-world
-              money collected via offline gift entry on the fundraiser
-              dashboard, tagged to this module.
+              free demo entry, no payment. {entryCount ?? 0}{" "}
+              {isSquares ? "square(s) claimed" : "joined"} so far. Log any
+              real-world money collected via offline gift entry on the
+              fundraiser dashboard, tagged to this module.
             </p>
             {module_.status === "active" ? (
               <a
@@ -317,6 +329,56 @@ export default async function ModuleAdminPage({
             ) : (
               <p className="text-xs text-muted-foreground">
                 Launch this module to make the entry page public.
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
+      {isSquares && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Draw numbers</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {drawResult ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Drawn {new Date(draw!.created_at).toLocaleString()} —
+                  server-side, recorded permanently in the audit trail
+                  (build spec rules 1 &amp; 2).
+                </p>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <p className="font-medium text-foreground">Row digits</p>
+                    <p className="font-mono">{drawResult.rowDigits.join(", ")}</p>
+                  </div>
+                  <div>
+                    <p className="font-medium text-foreground">Column digits</p>
+                    <p className="font-mono">{drawResult.colDigits.join(", ")}</p>
+                  </div>
+                </div>
+              </>
+            ) : isAdmin ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Assigns row/column digits 0-9 once, server-side
+                  (crypto.randomInt) — can&apos;t be undone or redrawn.
+                  Usually done once the board fills up.
+                </p>
+                <form action={drawSquares}>
+                  <input type="hidden" name="orgId" value={org.id} />
+                  <input type="hidden" name="moduleId" value={module_.id} />
+                  <input type="hidden" name="orgSlug" value={orgSlug} />
+                  <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                  <Button type="submit" variant="outline">
+                    Draw numbers now
+                  </Button>
+                </form>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Numbers haven&apos;t been drawn yet.
               </p>
             )}
           </CardContent>
