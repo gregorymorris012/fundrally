@@ -5,6 +5,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createFundraiser } from "@/lib/fundraisers";
 import { refundTransaction } from "@/lib/payments/refund";
 import { signOutAction } from "@/lib/auth";
+import { DEMO_MODE_ENABLED } from "@/lib/demo-mode";
+import { setModuleAvailability } from "@/lib/module-availability";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -39,6 +41,17 @@ const transactionStatusVariant = {
   disputed: "warning",
 } as const;
 
+// Active deviation (CLAUDE.md "Current deviations from the build spec"):
+// these get backend + org-admin management UI now, gated by this table,
+// demo-mode only — real-money checkout for any of them still waits on
+// Phase 4 regardless of this toggle.
+const CHANCE_MODULE_TYPES = [
+  { type: "squares", label: "Squares" },
+  { type: "fifty_fifty", label: "50/50" },
+  { type: "item_raffle", label: "Item raffle" },
+  { type: "wheel", label: "Prize wheel" },
+] as const;
+
 export default async function OrgDashboardPage({
   params,
   searchParams,
@@ -71,6 +84,14 @@ export default async function OrgDashboardPage({
   if (!membership) notFound();
 
   const isAdmin = membership.role === "owner" || membership.role === "admin";
+
+  const { data: availabilityRows } = await supabase
+    .from("module_availability")
+    .select("module_type, enabled")
+    .eq("org_id", org.id);
+  const availabilityByType = new Map(
+    (availabilityRows ?? []).map((r) => [r.module_type, r.enabled]),
+  );
 
   const { data: fundraisers } = await supabase
     .from("fundraisers")
@@ -136,12 +157,23 @@ export default async function OrgDashboardPage({
                 Stripe is connected for {org.name}.
               </AlertDescription>
             </Alert>
+          ) : DEMO_MODE_ENABLED ? (
+            <Alert variant="warning">
+              <TriangleAlert />
+              <AlertTitle>Demo mode — Stripe not connected.</AlertTitle>
+              <AlertDescription>
+                Fundraisers and modules can still be created and launched.
+                Record real-world activity with offline gift entry on each
+                fundraiser&apos;s dashboard; connect Stripe whenever you&apos;re
+                ready to accept card payments.
+              </AlertDescription>
+            </Alert>
           ) : (
             <Alert variant="warning">
               <TriangleAlert />
               <AlertTitle>Stripe isn&apos;t connected yet.</AlertTitle>
               <AlertDescription>
-                Connect Stripe before any fundraiser can accept payments.
+                Connect Stripe before any fundraiser can accept card payments.
               </AlertDescription>
             </Alert>
           )}
@@ -155,6 +187,40 @@ export default async function OrgDashboardPage({
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Module types</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Demo mode only — enabling a type here lets it be created and
+              managed on a fundraiser, with no real-money checkout path
+              until Phase 4&apos;s compliance work lands.
+            </p>
+            {CHANCE_MODULE_TYPES.map(({ type, label }) => {
+              const enabled = availabilityByType.get(type) ?? false;
+              return (
+                <form
+                  key={type}
+                  action={setModuleAvailability}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <input type="hidden" name="orgId" value={org.id} />
+                  <input type="hidden" name="orgSlug" value={org.slug} />
+                  <input type="hidden" name="moduleType" value={type} />
+                  <input type="hidden" name="enabled" value={(!enabled).toString()} />
+                  <span>{label}</span>
+                  <Button type="submit" variant={enabled ? "outline" : "default"} size="sm">
+                    {enabled ? "Disable" : "Enable"}
+                  </Button>
+                </form>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       {isAdmin && (
         <Card>
