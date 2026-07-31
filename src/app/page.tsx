@@ -75,6 +75,10 @@ export default async function Home() {
         </Button>
       </form>
 
+      <h1 className="font-heading text-xl font-bold text-foreground">
+        Manage Your Fundraisers
+      </h1>
+
       <div className="w-full space-y-2">
         {memberships.map((m) => {
           const org = Array.isArray(m.organizations)
