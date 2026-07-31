@@ -1,4 +1,5 @@
 import {
+  integer,
   pgEnum,
   pgTable,
   text,
@@ -23,6 +24,7 @@ export const fundraisers = pgTable(
       .references(() => organizations.id, { onDelete: "cascade" }),
     title: text("title").notNull(),
     slug: text("slug").notNull(),
+    goalAmountCents: integer("goal_amount_cents"),
     startsAt: timestamp("starts_at", { withTimezone: true }),
     endsAt: timestamp("ends_at", { withTimezone: true }),
     status: fundraiserStatus("status").notNull().default("draft"),

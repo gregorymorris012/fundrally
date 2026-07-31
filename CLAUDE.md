@@ -27,9 +27,13 @@ catalog, cart, checkout, admin order history)**. `product` is the only
 golf/item_raffle are Phase 5/6/7 and don't exist yet beyond the enum value.
 Don't assume later-phase tables (`draws`, `module_availability`,
 `compliance_records`, etc.) exist; check `db/schema/` before referencing
-them. In particular, don't build UI for the chance-based module types
-(wheel, squares, fifty_fifty, item_raffle) before Phase 4's compliance
-gating exists — the build spec is explicit that they can't ship without it.
+them. `module_availability` is a partial exception — see "Current
+deviations from the build spec" below: chance-based module types (wheel,
+squares, fifty_fifty, item_raffle) can get backend + org-admin management
+UI built now, ahead of Phase 4, gated by that flag and demo-mode only.
+That does **not** suspend Phase 4's compliance gate on real-money
+checkout for those modules — it stays in force regardless of Stripe or
+demo status.
 
 ## Commands
 
@@ -70,6 +74,15 @@ To run a single test file: `npx vitest run tests/rls/cross-tenant.test.ts`.
 `@base-ui/react`, not Radix — see the Base UI note below), Supabase
 (Postgres/Auth/Realtime/Storage), Drizzle ORM, deployed on Vercel. Full
 stack table is in the build spec section 2.
+
+### Hierarchy
+
+`organizations` → `fundraisers` (the master campaign; carries
+`goal_amount_cents`) → `modules` (the mini-fundraisers under it: product
+sale, squares, 50/50, item raffle, etc.). A `transactions` row may attach
+to a module (`module_id` set) or sit at the master-campaign level
+(`module_id` null, as donations already do) — both count toward
+`fundraisers.goal_amount_cents`.
 
 **Non-negotiable rules** (build spec section 3 — violating these is a
 defect, not a style preference):
@@ -161,6 +174,18 @@ visitors. Nothing exposed there is sensitive — a Stripe *account id*
 The platform fee is one constant: `PLATFORM_FEE_BPS` in
 `src/lib/stripe/fees.ts`, currently `0`. Change that value when pricing is
 decided; nothing else needs to move.
+
+`transactions` is the single source of financial truth: all totals, goal
+progress, and reports read from it, never from module tables directly —
+a fundraiser's goal progress is the sum of its confirmed `transactions`
+rows for that `fundraiser_id`, compared against
+`fundraisers.goal_amount_cents`. Stripe is one writer to that ledger, not
+the ledger itself — manual/offline gift entry (not yet built) will be a
+second writer, and reporting must stay indifferent to which writer
+produced a row. A posted transaction is never edited in place;
+corrections are a new adjustment/void row referencing the original (same
+shape as the refund/dispute rule above), and that applies to any future
+manual-entry path too — no writer gets to rewrite history.
 
 ### Product module (Phase 2)
 
@@ -327,16 +352,42 @@ that weren't obvious setting this up:
   `/org/*/stripe/callback`, or magic-link redirects and the Stripe Connect
   OAuth callback will point at the wrong place.
 
+### Current deviations from the build spec (active)
+
+Two deliberate, temporary departures from the phase order below — scoped
+to this stage, not permanent policy:
+
+- **Chance-based modules pulled forward.** `module_availability` was
+  sequenced as Phase 4 work, but chance-based module types (wheel,
+  squares, fifty_fifty, item_raffle) can have their backend and
+  org-admin management UI built now, gated by a `module_availability`
+  compliance flag and running in demo mode only. **This does not
+  suspend the Phase 4 compliance gate itself** — no chance-based module
+  gets a real-money checkout path until that compliance work lands,
+  independent of Stripe connection status. Reason: legal review found
+  online raffle/50-50 sales expressly authorized only in Maine among
+  target states — this is a compliance gate, not a preference, and
+  enabling real checkout ahead of it is a defect, not a helpful shortcut.
+- **Stripe connection is not a hard gate on fundraiser/module creation.**
+  TODO, not yet implemented: add a feature flag that lets fundraiser/
+  module creation and launch proceed without a connected Stripe account
+  (demo mode). Stripe Connect stays fully wired end-to-end; the flag
+  only removes it as a hard requirement at this stage. This suspension
+  applies to non-chance modules only — it has no bearing on, and does
+  not loosen, the chance-module compliance gate above.
+
 ### Build phases
 
 The build spec (section 8) sequences work as: Phase 0 foundation (done) →
 Phase 1 money spine (done) → Phase 2 first module (done, product/cookie
 sale) → Phase 3 reporting/payouts → Phase 4 compliance gating → Phase 5
 auction → Phase 6 chance modules → Phase 7 golf → Phase 8 comms/sponsors.
-Don't jump ahead — e.g. don't build chance-module UI before
-`module_availability` gating exists (Phase 4), and don't assume a
-`draws` table exists without checking `db/schema/` (Phase 6 is what
-introduces it).
+Don't jump ahead on anything not covered by the active deviations above
+— e.g. don't assume a `draws` table exists without checking `db/schema/`
+(Phase 6 is what introduces it). Chance-module UI is the one exception,
+per "Current deviations from the build spec": buildable now, flag-gated
+and demo-mode-only, with Phase 4's real-money compliance gate still
+fully in force.
 
 ### Base UI note
 

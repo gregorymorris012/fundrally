@@ -57,6 +57,13 @@
       "when": 1784914208413,
       "tag": "0007_phase2_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1785509998165,
+      "tag": "0008_rainy_winter_soldier",
+      "breakpoints": true
     }
   ]
 }

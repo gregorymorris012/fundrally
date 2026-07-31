@@ -1,0 +1,1 @@
+ALTER TABLE "fundraisers" ADD COLUMN "goal_amount_cents" integer;
