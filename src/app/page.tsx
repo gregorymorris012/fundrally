@@ -41,6 +41,28 @@ export default async function Home() {
   // org keep the plain switcher below.
   if (!memberships?.length) redirect("/onboarding");
 
+  // Deliberately a smarter link, not an auto-redirect: an org with exactly
+  // one fundraiser sends its switcher link straight to that fundraiser's
+  // dashboard instead of the org shell page, so partners land on the
+  // dashboard in one click rather than an emptier-feeling org page. An
+  // unconditional redirect here would recreate the earlier
+  // onboarding redirect-loop bug — the org page's "Switch organization"
+  // link comes right back to "/", which would just bounce straight back
+  // into the dashboard with nowhere to actually reach the org switcher.
+  const orgIds = memberships
+    .map((m) => {
+      const org = Array.isArray(m.organizations) ? m.organizations[0] : m.organizations;
+      return org?.id;
+    })
+    .filter((id): id is string => Boolean(id));
+  const { data: allFundraisers } = orgIds.length
+    ? await supabase.from("fundraisers").select("org_id, slug").in("org_id", orgIds)
+    : { data: [] };
+  const fundraisersByOrg = new Map<string, { slug: string }[]>();
+  for (const f of allFundraisers ?? []) {
+    fundraisersByOrg.set(f.org_id, [...(fundraisersByOrg.get(f.org_id) ?? []), f]);
+  }
+
   return (
     <div className="mx-auto flex min-h-svh max-w-sm flex-col items-center gap-4 p-6">
       <Logo size={144} />
@@ -59,10 +81,15 @@ export default async function Home() {
             ? m.organizations[0]
             : m.organizations;
           if (!org) return null;
+          const orgFundraisers = fundraisersByOrg.get(org.id);
+          const href =
+            orgFundraisers?.length === 1
+              ? `/org/${org.slug}/fundraisers/${orgFundraisers[0].slug}`
+              : `/org/${org.slug}`;
           return (
             <Link
               key={org.id}
-              href={`/org/${org.slug}`}
+              href={href}
               className={buttonVariants({ variant: "outline", className: "w-full justify-start" })}
             >
               {org.name}

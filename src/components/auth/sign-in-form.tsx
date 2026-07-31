@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { testLoginAction } from "@/lib/auth";
+import { testLoginAction, demoLoginAction } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -204,6 +204,14 @@ export function SignInForm() {
               <p className="text-xs text-muted-foreground">
                 Testing only — signs in as a dedicated test account, not a
                 real phone or email.
+              </p>
+            </form>
+            <form className="space-y-1.5" action={demoLoginAction}>
+              <Button type="submit" variant="secondary" className="w-full">
+                View demo <Badge variant="warning">DEV</Badge>
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Lands on the pre-seeded NuPath 2026 fundraiser dashboard.
               </p>
             </form>
           </>

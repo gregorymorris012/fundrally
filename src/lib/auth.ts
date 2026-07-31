@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
+import { DEMO_MODE_ENABLED, DEMO_OWNER_EMAIL } from "@/lib/demo-mode";
 
 export async function signOutAction() {
   const supabase = await createClient();
@@ -44,6 +45,37 @@ export async function testLoginAction() {
   });
   if (error || !data.properties?.hashed_token) {
     throw error ?? new Error("Failed to generate test login link.");
+  }
+
+  const supabase = await createClient();
+  const { error: verifyError } = await supabase.auth.verifyOtp({
+    token_hash: data.properties.hashed_token,
+    type: "email",
+  });
+  if (verifyError) throw verifyError;
+
+  redirect("/");
+}
+
+// Same Admin-API generateLink+verifyOtp mechanism as testLoginAction, same
+// gate, but a FIXED email rather than a random one per click — see
+// DEMO_OWNER_EMAIL in src/lib/demo-mode.ts for why: this is the
+// stakeholder-walkthrough entry point, which needs to land on the same
+// pre-seeded fundraiser every time, not a fresh blank org. Requires the
+// seed route (src/app/api/dev/seed/route.ts) to have already run at least
+// once so this email actually owns the demo org.
+export async function demoLoginAction() {
+  if (!DEMO_MODE_ENABLED) {
+    throw new Error("Demo mode is disabled in this environment.");
+  }
+
+  const admin = createServiceClient();
+  const { data, error } = await admin.auth.admin.generateLink({
+    type: "magiclink",
+    email: DEMO_OWNER_EMAIL,
+  });
+  if (error || !data.properties?.hashed_token) {
+    throw error ?? new Error("Failed to generate demo login link.");
   }
 
   const supabase = await createClient();
