@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LineChart, Dices, HandCoins } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
-import { updateFundraiserGoal } from "@/lib/fundraisers";
+import { updateFundraiserGoal, deleteFundraiser } from "@/lib/fundraisers";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -250,6 +251,32 @@ export default async function FundraiserLandingPage({
           </Card>
         </Link>
       </div>
+
+      {isAdmin && (
+        <Card className="border-destructive/30">
+          <CardHeader>
+            <CardTitle>Danger zone</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Permanently deletes this fundraiser and everything under it
+              (modules, entries, draws). Only allowed if it has no payment
+              activity yet — close it instead once real money has moved.
+            </p>
+            <form action={deleteFundraiser}>
+              <input type="hidden" name="fundraiserId" value={fundraiser.id} />
+              <input type="hidden" name="orgSlug" value={orgSlug} />
+              <ConfirmSubmitButton
+                type="submit"
+                variant="destructive"
+                confirmMessage={`Delete "${fundraiser.title}" permanently? This can't be undone.`}
+              >
+                Delete fundraiser
+              </ConfirmSubmitButton>
+            </form>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

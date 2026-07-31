@@ -70,3 +70,29 @@ export async function createOrganizationAction(formData: FormData) {
   const { slug } = await createOrganizationWithUniqueSlug({ name, stateCode });
   redirect(`/org/${slug}`);
 }
+
+// Same shape as deleteFundraiser in lib/fundraisers.ts: the actual safety
+// guarantee is the RLS policy ("org admins can delete organizations
+// without payment activity", 0016_delete_policies.sql), which won't match
+// the row at all if any transaction references it — a plain client DELETE
+// works here (no service role, no RPC) for the same reason
+// createFundraiser doesn't need one: the actor already has a membership
+// row, so there's no bootstrapping problem, and this is a DELETE not the
+// org-creation INSERT that create_organization() exists to guard.
+export async function deleteOrganization(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+
+  const supabase = await createClient();
+  const { error, count } = await supabase
+    .from("organizations")
+    .delete({ count: "exact" })
+    .eq("id", orgId);
+  if (error) throw error;
+  if (!count) {
+    throw new Error(
+      "Can't delete an organization with payment activity in any of its fundraisers.",
+    );
+  }
+
+  redirect("/");
+}

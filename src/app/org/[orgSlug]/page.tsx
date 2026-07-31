@@ -3,10 +3,12 @@ import { notFound } from "next/navigation";
 import { CircleCheck, TriangleAlert, CircleX } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
 import { createFundraiser } from "@/lib/fundraisers";
+import { deleteOrganization } from "@/lib/organizations";
 import { refundTransaction } from "@/lib/payments/refund";
 import { signOutAction } from "@/lib/auth";
 import { DEMO_MODE_ENABLED } from "@/lib/demo-mode";
 import { setModuleAvailability } from "@/lib/module-availability";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -355,6 +357,31 @@ export default async function OrgDashboardPage({
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <Card className="border-destructive/30">
+          <CardHeader>
+            <CardTitle>Danger zone</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Permanently deletes this organization and everything under it
+              — fundraisers, modules, memberships. Only allowed if none of
+              its fundraisers have any payment activity yet.
+            </p>
+            <form action={deleteOrganization}>
+              <input type="hidden" name="orgId" value={org.id} />
+              <ConfirmSubmitButton
+                type="submit"
+                variant="destructive"
+                confirmMessage={`Delete "${org.name}" permanently? This can't be undone.`}
+              >
+                Delete organization
+              </ConfirmSubmitButton>
+            </form>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

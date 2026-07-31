@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 
 // No SECURITY DEFINER RPC needed here, unlike create_organization(): by
@@ -86,4 +87,30 @@ export async function updateFundraiserGoal(formData: FormData) {
   if (error) throw error;
 
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
+}
+
+// The actual safety guarantee is the RLS policy itself ("org admins can
+// delete fundraisers without payment activity",
+// 0016_delete_policies.sql), which refuses to match the row at all if any
+// transaction references it — this is not a check-then-delete in app
+// code. A DELETE blocked by that USING clause isn't an error, though: it
+// just matches and deletes 0 rows, so that's what gets checked here to
+// turn "silently did nothing" into a clear message.
+export async function deleteFundraiser(formData: FormData) {
+  const fundraiserId = String(formData.get("fundraiserId"));
+  const orgSlug = String(formData.get("orgSlug"));
+
+  const supabase = await createClient();
+  const { error, count } = await supabase
+    .from("fundraisers")
+    .delete({ count: "exact" })
+    .eq("id", fundraiserId);
+  if (error) throw error;
+  if (!count) {
+    throw new Error(
+      "Can't delete a fundraiser with payment activity — close it instead.",
+    );
+  }
+
+  redirect(`/org/${orgSlug}`);
 }
