@@ -188,59 +188,6 @@ export default async function OrgDashboardPage({
         </CardContent>
       </Card>
 
-      {isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Module types</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            <p className="text-xs text-muted-foreground">
-              Demo mode only — enabling a type here lets it be created and
-              managed on a fundraiser, with no real-money checkout path
-              until Phase 4&apos;s compliance work lands.
-            </p>
-            {CHANCE_MODULE_TYPES.map(({ type, label }) => {
-              const enabled = availabilityByType.get(type) ?? false;
-              return (
-                <form
-                  key={type}
-                  action={setModuleAvailability}
-                  className="flex items-center justify-between text-sm"
-                >
-                  <input type="hidden" name="orgId" value={org.id} />
-                  <input type="hidden" name="orgSlug" value={org.slug} />
-                  <input type="hidden" name="moduleType" value={type} />
-                  <input type="hidden" name="enabled" value={(!enabled).toString()} />
-                  <span>{label}</span>
-                  <Button type="submit" variant={enabled ? "outline" : "default"} size="sm">
-                    {enabled ? "Disable" : "Enable"}
-                  </Button>
-                </form>
-              );
-            })}
-          </CardContent>
-        </Card>
-      )}
-
-      {isAdmin && (
-        <Card>
-          <CardHeader>
-            <CardTitle>New fundraiser</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <form action={createFundraiser} className="space-y-3">
-              <input type="hidden" name="orgId" value={org.id} />
-              <input type="hidden" name="orgSlug" value={org.slug} />
-              <div className="space-y-1.5">
-                <Label htmlFor="title">Title</Label>
-                <Input id="title" name="title" required />
-              </div>
-              <Button type="submit">Create</Button>
-            </form>
-          </CardContent>
-        </Card>
-      )}
-
       <Card>
         <CardHeader>
           <CardTitle>Fundraisers</CardTitle>
@@ -293,6 +240,63 @@ export default async function OrgDashboardPage({
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>New fundraiser</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form action={createFundraiser} className="space-y-3">
+              <input type="hidden" name="orgId" value={org.id} />
+              <input type="hidden" name="orgSlug" value={org.slug} />
+              <div className="space-y-1.5">
+                <Label htmlFor="title">Title</Label>
+                <Input id="title" name="title" required />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="goal">Goal (USD, optional)</Label>
+                <Input id="goal" name="goal" type="number" min="0" step="0.01" />
+              </div>
+              <Button type="submit">Create</Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Module types</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-xs text-muted-foreground">
+              Demo mode only — enabling a type here lets it be created and
+              managed on a fundraiser, with no real-money checkout path
+              until Phase 4&apos;s compliance work lands.
+            </p>
+            {CHANCE_MODULE_TYPES.map(({ type, label }) => {
+              const enabled = availabilityByType.get(type) ?? false;
+              return (
+                <form
+                  key={type}
+                  action={setModuleAvailability}
+                  className="flex items-center justify-between text-sm"
+                >
+                  <input type="hidden" name="orgId" value={org.id} />
+                  <input type="hidden" name="orgSlug" value={org.slug} />
+                  <input type="hidden" name="moduleType" value={type} />
+                  <input type="hidden" name="enabled" value={(!enabled).toString()} />
+                  <span>{label}</span>
+                  <Button type="submit" variant={enabled ? "outline" : "default"} size="sm">
+                    {enabled ? "Disable" : "Enable"}
+                  </Button>
+                </form>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

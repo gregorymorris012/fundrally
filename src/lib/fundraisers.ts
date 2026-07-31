@@ -25,9 +25,12 @@ const UNIQUE_VIOLATION = "23505";
 // Shared by createFundraiser (org dashboard form) and the onboarding
 // wizard's fundraiser-type step — both just need "create a fundraiser
 // from a title, picking a free slug" and differ in what happens after.
+// goalAmountCents is optional (nullable column) so the onboarding wizard,
+// which doesn't ask for a goal up front, keeps working unchanged.
 export async function createFundraiserWithUniqueSlug(input: {
   orgId: string;
   title: string;
+  goalAmountCents?: number | null;
 }) {
   const baseSlug = slugify(input.title) || "fundraiser";
   const supabase = await createClient();
@@ -36,7 +39,13 @@ export async function createFundraiserWithUniqueSlug(input: {
   for (let attempt = 0; ; attempt++) {
     const { data, error } = await supabase
       .from("fundraisers")
-      .insert({ org_id: input.orgId, title: input.title, slug, status: "active" })
+      .insert({
+        org_id: input.orgId,
+        title: input.title,
+        slug,
+        status: "active",
+        goal_amount_cents: input.goalAmountCents ?? null,
+      })
       .select("id, slug")
       .single();
     if (!error) return data;
@@ -49,8 +58,32 @@ export async function createFundraiser(formData: FormData) {
   const orgId = String(formData.get("orgId"));
   const orgSlug = String(formData.get("orgSlug"));
   const title = String(formData.get("title"));
+  const goalRaw = formData.get("goal");
+  const goalAmountCents =
+    goalRaw != null && goalRaw !== "" ? Math.round(Number(goalRaw) * 100) : null;
 
-  await createFundraiserWithUniqueSlug({ orgId, title });
+  await createFundraiserWithUniqueSlug({ orgId, title, goalAmountCents });
 
   revalidatePath(`/org/${orgSlug}`);
+}
+
+// Plain RLS update ("org admins can update fundraisers",
+// db/migrations/0004_phase1_policies.sql) — same shape as
+// updateModuleStatus, no service role needed.
+export async function updateFundraiserGoal(formData: FormData) {
+  const fundraiserId = String(formData.get("fundraiserId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const goalRaw = formData.get("goal");
+  const goalAmountCents =
+    goalRaw != null && goalRaw !== "" ? Math.round(Number(goalRaw) * 100) : null;
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("fundraisers")
+    .update({ goal_amount_cents: goalAmountCents })
+    .eq("id", fundraiserId);
+  if (error) throw error;
+
+  revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
 }

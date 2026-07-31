@@ -2,8 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { LineChart, Dices, HandCoins } from "lucide-react";
 import { createClient } from "@/lib/supabase/server";
+import { updateFundraiserGoal } from "@/lib/fundraisers";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Card,
   CardContent,
@@ -57,6 +60,7 @@ export default async function FundraiserLandingPage({
     .eq("user_id", user.id)
     .maybeSingle();
   if (!membership) notFound();
+  const isAdmin = membership.role === "owner" || membership.role === "admin";
 
   const { data: fundraiser } = await supabase
     .from("fundraisers")
@@ -166,6 +170,36 @@ export default async function FundraiserLandingPage({
               />
             </div>
           ) : null}
+
+          {isAdmin && (
+            <form
+              action={updateFundraiserGoal}
+              className="flex items-end gap-2 border-t pt-3"
+            >
+              <input type="hidden" name="fundraiserId" value={fundraiser.id} />
+              <input type="hidden" name="orgSlug" value={orgSlug} />
+              <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+              <div className="flex-1 space-y-1.5">
+                <Label htmlFor="goal">Goal (USD)</Label>
+                <Input
+                  id="goal"
+                  name="goal"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  defaultValue={
+                    fundraiser.goal_amount_cents
+                      ? (fundraiser.goal_amount_cents / 100).toFixed(2)
+                      : ""
+                  }
+                  placeholder="No goal set"
+                />
+              </div>
+              <Button type="submit" variant="outline">
+                Update goal
+              </Button>
+            </form>
+          )}
         </CardContent>
       </Card>
 
