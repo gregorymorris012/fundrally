@@ -8,5 +8,6 @@ export * from "./audit-log";
 export * from "./modules";
 export * from "./module-availability";
 export * from "./module-entries";
+export * from "./draws";
 export * from "./products";
 export * from "./orders";

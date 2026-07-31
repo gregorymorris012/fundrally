@@ -92,6 +92,27 @@
       "when": 1785515621039,
       "tag": "0012_module_entries_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1785516447978,
+      "tag": "0013_optimal_killmonger",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1785516454734,
+      "tag": "0014_draws_and_squares_positions",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1785516794220,
+      "tag": "0015_draws_module_unique",
+      "breakpoints": true
     }
   ]
 }

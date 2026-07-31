@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations";
 import { modules } from "./modules";
 
@@ -23,6 +23,14 @@ export const moduleEntries = pgTable("module_entries", {
     .references(() => modules.id, { onDelete: "cascade" }),
   displayName: text("display_name").notNull(),
   note: text("note"),
+  // Squares only (0-99, a 10x10 grid) — null for raffle/50-50/wheel, which
+  // have no grid concept. A partial unique index (module_id, position)
+  // WHERE position IS NOT NULL, added by hand in
+  // 0014_draws_and_squares_positions.sql since Drizzle's schema builder
+  // doesn't cleanly express a partial unique constraint, is what actually
+  // stops two guests claiming the same square — this column alone doesn't
+  // enforce that.
+  position: integer("position"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
