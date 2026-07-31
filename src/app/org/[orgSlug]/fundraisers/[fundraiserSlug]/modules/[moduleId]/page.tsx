@@ -91,6 +91,13 @@ export default async function ModuleAdminPage({
 
   const isChanceModule = CHANCE_MODULE_TYPES.includes(module_.type);
 
+  const { count: entryCount } = isChanceModule
+    ? await supabase
+        .from("module_entries")
+        .select("id", { count: "exact", head: true })
+        .eq("module_id", module_.id)
+    : { count: 0 };
+
   const { data: products } = module_.type === "product"
     ? await supabase
         .from("products")
@@ -289,16 +296,29 @@ export default async function ModuleAdminPage({
       {isChanceModule && (
         <Card>
           <CardHeader>
-            <CardTitle>Configuration</CardTitle>
+            <CardTitle>Public entry page</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Gameplay configuration for {MODULE_TYPE_LABELS[module_.type]} isn&apos;t
-              built yet — its shape depends on Phase 4/6 work. This module
-              can be created, launched, paused, and closed today; record any
-              real-world activity via offline gift entry on the fundraiser
-              dashboard.
+              Share this link so people can join {MODULE_TYPE_LABELS[module_.type]} —
+              free demo entry, no payment. {entryCount ?? 0} joined so far.
+              Real gameplay (picking squares, ticket numbers, a spin) isn&apos;t
+              built yet; this only records who wants in. Log any real-world
+              money collected via offline gift entry on the fundraiser
+              dashboard, tagged to this module.
             </p>
+            {module_.status === "active" ? (
+              <a
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+                href={`/play/${orgSlug}/${fundraiserSlug}/${module_.id}`}
+              >
+                View public entry page
+              </a>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                Launch this module to make the entry page public.
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
