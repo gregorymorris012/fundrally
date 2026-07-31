@@ -1,4 +1,3 @@
-import { Fragment } from "react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
@@ -60,12 +59,16 @@ export default async function PlayModulePage({
 
   const { data: module_ } = await supabase
     .from("modules")
-    .select("id, type, status")
+    .select("id, type, status, config")
     .eq("id", moduleId)
     .eq("fundraiser_id", fundraiser.id)
     .eq("status", "active")
     .maybeSingle();
   if (!module_) notFound();
+
+  const squaresConfig = module_.config as { rowLabel?: string; colLabel?: string } | null;
+  const rowLabel = squaresConfig?.rowLabel || "Team A";
+  const colLabel = squaresConfig?.colLabel || "Team B";
 
   const { data: entries } = await supabase
     .from("module_entries")
@@ -159,51 +162,84 @@ export default async function PlayModulePage({
               )}
               <div className="overflow-x-auto">
                 <div
-                  className="grid w-fit gap-0.5"
+                  className="grid w-fit"
                   style={{
-                    gridTemplateColumns: `2.5rem repeat(${GRID_SIZE}, 2.5rem)`,
+                    gridTemplateColumns: `1.5rem 1.5rem repeat(${GRID_SIZE}, 2.25rem)`,
+                    gridTemplateRows: `1.75rem 1.5rem repeat(${GRID_SIZE}, 2.25rem)`,
                   }}
                 >
-                  <div />
+                  {/* corner spacer */}
+                  <div style={{ gridRow: "1 / 3", gridColumn: "1 / 3" }} />
+
+                  {/* column team bar (top) */}
+                  <div
+                    style={{ gridRow: 1, gridColumn: `3 / span ${GRID_SIZE}` }}
+                    className="flex items-center justify-center overflow-hidden bg-primary px-1 text-[10px] font-bold tracking-wide text-primary-foreground uppercase"
+                  >
+                    {colLabel}
+                  </div>
+
+                  {/* row team bar (side) */}
+                  <div
+                    style={{
+                      gridRow: `3 / span ${GRID_SIZE}`,
+                      gridColumn: 1,
+                      writingMode: "vertical-rl",
+                    }}
+                    className="flex rotate-180 items-center justify-center overflow-hidden bg-secondary px-0.5 text-[10px] font-bold tracking-wide text-secondary-foreground uppercase"
+                  >
+                    {rowLabel}
+                  </div>
+
+                  {/* column digit headers */}
                   {Array.from({ length: GRID_SIZE }, (_, col) => (
                     <div
                       key={`col-${col}`}
-                      className="flex h-10 items-center justify-center text-xs font-mono text-muted-foreground"
+                      style={{ gridRow: 2, gridColumn: col + 3 }}
+                      className="flex items-center justify-center text-xs font-mono text-muted-foreground"
                     >
                       {drawResult ? drawResult.colDigits[col] : ""}
                     </div>
                   ))}
+
+                  {/* row digit headers */}
                   {Array.from({ length: GRID_SIZE }, (_, row) => (
-                    <Fragment key={`row-${row}`}>
-                      <div className="flex h-10 items-center justify-center text-xs font-mono text-muted-foreground">
-                        {drawResult ? drawResult.rowDigits[row] : ""}
-                      </div>
-                      {Array.from({ length: GRID_SIZE }, (_, col) => {
-                        const position = row * GRID_SIZE + col;
-                        const claimedName = claimedByPosition.get(position);
-                        return claimedName ? (
-                          <div
-                            key={position}
-                            title={claimedName}
-                            className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-sm bg-primary/10 text-[10px] font-medium text-primary"
-                          >
-                            {claimedName.slice(0, 3)}
-                          </div>
-                        ) : (
-                          <Link
-                            key={position}
-                            href={`/play/${orgSlug}/${fundraiserSlug}/${module_.id}?claim=${position}`}
-                            className={cn(
-                              "flex h-10 w-10 items-center justify-center rounded-sm border border-dashed border-border text-[10px] text-muted-foreground hover:bg-muted",
-                              claimPosition === position && "border-primary",
-                            )}
-                          >
-                            {position}
-                          </Link>
-                        );
-                      })}
-                    </Fragment>
+                    <div
+                      key={`row-${row}`}
+                      style={{ gridRow: row + 3, gridColumn: 2 }}
+                      className="flex items-center justify-center text-xs font-mono text-muted-foreground"
+                    >
+                      {drawResult ? drawResult.rowDigits[row] : ""}
+                    </div>
                   ))}
+
+                  {/* squares */}
+                  {Array.from({ length: GRID_SIZE }, (_, row) =>
+                    Array.from({ length: GRID_SIZE }, (_, col) => {
+                      const position = row * GRID_SIZE + col;
+                      const claimedName = claimedByPosition.get(position);
+                      return claimedName ? (
+                        <div
+                          key={position}
+                          title={claimedName}
+                          style={{ gridRow: row + 3, gridColumn: col + 3 }}
+                          className="flex items-center justify-center overflow-hidden border border-border bg-primary/10 text-[9px] font-medium text-primary"
+                        >
+                          {claimedName.slice(0, 3)}
+                        </div>
+                      ) : (
+                        <Link
+                          key={position}
+                          href={`/play/${orgSlug}/${fundraiserSlug}/${module_.id}?claim=${position}`}
+                          style={{ gridRow: row + 3, gridColumn: col + 3 }}
+                          className={cn(
+                            "flex items-center justify-center border border-border hover:bg-muted",
+                            claimPosition === position && "bg-muted ring-1 ring-inset ring-primary",
+                          )}
+                        />
+                      );
+                    }),
+                  )}
                 </div>
               </div>
             </CardContent>

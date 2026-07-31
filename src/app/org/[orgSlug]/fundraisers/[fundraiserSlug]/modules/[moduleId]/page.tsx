@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createProduct } from "@/lib/products";
-import { updateModuleStatus } from "@/lib/modules";
+import { updateModuleStatus, updateSquaresLabels } from "@/lib/modules";
 import { drawSquares } from "@/lib/draws";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,13 +84,14 @@ export default async function ModuleAdminPage({
 
   const { data: module_ } = await supabase
     .from("modules")
-    .select("id, type, status")
+    .select("id, type, status, config")
     .eq("id", moduleId)
     .eq("fundraiser_id", fundraiser.id)
     .maybeSingle();
   if (!module_) notFound();
 
   const isChanceModule = CHANCE_MODULE_TYPES.includes(module_.type);
+  const squaresConfig = module_.config as { rowLabel?: string; colLabel?: string } | null;
 
   const { count: entryCount } = isChanceModule
     ? await supabase
@@ -331,6 +332,42 @@ export default async function ModuleAdminPage({
                 Launch this module to make the entry page public.
               </p>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {isSquares && isAdmin && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Board labels</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form action={updateSquaresLabels} className="flex flex-wrap items-end gap-3">
+              <input type="hidden" name="moduleId" value={module_.id} />
+              <input type="hidden" name="orgSlug" value={orgSlug} />
+              <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+              <div className="space-y-1.5">
+                <Label htmlFor="colLabel">Column team (top)</Label>
+                <Input
+                  id="colLabel"
+                  name="colLabel"
+                  defaultValue={squaresConfig?.colLabel ?? ""}
+                  placeholder="e.g. Patriots"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="rowLabel">Row team (side)</Label>
+                <Input
+                  id="rowLabel"
+                  name="rowLabel"
+                  defaultValue={squaresConfig?.rowLabel ?? ""}
+                  placeholder="e.g. Seahawks"
+                />
+              </div>
+              <Button type="submit" variant="outline">
+                Save labels
+              </Button>
+            </form>
           </CardContent>
         </Card>
       )}

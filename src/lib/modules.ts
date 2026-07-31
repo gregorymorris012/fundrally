@@ -145,3 +145,28 @@ export async function updateModuleStatus(formData: FormData) {
   );
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
 }
+
+// Squares-only board labels (e.g. team names), stored in modules.config —
+// unused by every other module type so far, so this replaces the whole
+// object rather than merging keys into it. Plain RLS update ("org admins
+// can update modules"), same as updateModuleStatus — no service role
+// needed, this isn't a write path that bypasses a client policy.
+export async function updateSquaresLabels(formData: FormData) {
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const rowLabel = String(formData.get("rowLabel") ?? "").trim().slice(0, 40);
+  const colLabel = String(formData.get("colLabel") ?? "").trim().slice(0, 40);
+
+  const supabase = await createClient();
+  const { error } = await supabase
+    .from("modules")
+    .update({ config: { rowLabel, colLabel } })
+    .eq("id", moduleId);
+  if (error) throw error;
+
+  revalidatePath(
+    `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,
+  );
+  revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+}
