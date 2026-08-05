@@ -120,6 +120,20 @@
       "when": 1785521432294,
       "tag": "0016_delete_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1785939723925,
+      "tag": "0017_brainy_yellow_claw",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1785939740160,
+      "tag": "0018_payouts_policies",
+      "breakpoints": true
     }
   ]
 }

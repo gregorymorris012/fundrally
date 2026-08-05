@@ -11,3 +11,4 @@ export * from "./module-entries";
 export * from "./draws";
 export * from "./products";
 export * from "./orders";
+export * from "./payouts";
