@@ -226,4 +226,155 @@ describe("Stripe webhook processing", () => {
     expect((audit?.before as { charges_enabled: boolean })?.charges_enabled).toBe(false);
     expect((audit?.after as { charges_enabled: boolean })?.charges_enabled).toBe(true);
   });
+
+  describe("Phase 3: payout events", () => {
+    // Reuses the stripe_account_id the account.updated test above already
+    // set on this org — payout events are matched to an org by
+    // event.account, not anything in metadata.
+    const stripePayoutId = `po_test_${runId}`;
+
+    it("payout.created upserts a payouts row and logs an audit row", async () => {
+      const { data: org } = await admin
+        .from("organizations")
+        .select("stripe_account_id")
+        .eq("id", orgId)
+        .single();
+      const stripeAccountId = org!.stripe_account_id as string;
+
+      await processStripeEvent(
+        makeEvent(
+          `evt_payout_created_${runId}`,
+          "payout.created",
+          {
+            id: stripePayoutId,
+            amount: 4200,
+            currency: "usd",
+            status: "pending",
+            arrival_date: Math.floor(Date.now() / 1000) + 86400,
+            failure_code: null,
+            failure_message: null,
+          },
+          stripeAccountId,
+        ),
+        admin,
+      );
+
+      const { data: payout } = await admin
+        .from("payouts")
+        .select("*")
+        .eq("stripe_payout_id", stripePayoutId)
+        .single();
+      expect(payout?.amount_cents).toBe(4200);
+      expect(payout?.status).toBe("pending");
+
+      const { data: audit } = await admin
+        .from("audit_log")
+        .select("id")
+        .eq("org_id", orgId)
+        .eq("action", "payout.created");
+      expect(audit).toHaveLength(1);
+    });
+
+    it("payout.paid updates the same row in place rather than inserting a new one", async () => {
+      const { data: org } = await admin
+        .from("organizations")
+        .select("stripe_account_id")
+        .eq("id", orgId)
+        .single();
+      const stripeAccountId = org!.stripe_account_id as string;
+
+      await processStripeEvent(
+        makeEvent(
+          `evt_payout_paid_${runId}`,
+          "payout.paid",
+          {
+            id: stripePayoutId,
+            amount: 4200,
+            currency: "usd",
+            status: "paid",
+            arrival_date: Math.floor(Date.now() / 1000),
+            failure_code: null,
+            failure_message: null,
+          },
+          stripeAccountId,
+        ),
+        admin,
+      );
+
+      const { data: payouts } = await admin
+        .from("payouts")
+        .select("id, status")
+        .eq("stripe_payout_id", stripePayoutId);
+      expect(payouts).toHaveLength(1);
+      expect(payouts?.[0]?.status).toBe("paid");
+
+      const { data: audit } = await admin
+        .from("audit_log")
+        .select("before, after")
+        .eq("org_id", orgId)
+        .eq("action", "payout.paid")
+        .single();
+      expect((audit?.before as { status: string })?.status).toBe("pending");
+      expect((audit?.after as { status: string })?.status).toBe("paid");
+    });
+
+    it("payout.failed records the failure reason", async () => {
+      const failedPayoutId = `po_failed_${randomUUID().slice(0, 8)}`;
+      const { data: org } = await admin
+        .from("organizations")
+        .select("stripe_account_id")
+        .eq("id", orgId)
+        .single();
+      const stripeAccountId = org!.stripe_account_id as string;
+
+      await processStripeEvent(
+        makeEvent(
+          `evt_payout_failed_${runId}`,
+          "payout.failed",
+          {
+            id: failedPayoutId,
+            amount: 1000,
+            currency: "usd",
+            status: "failed",
+            arrival_date: Math.floor(Date.now() / 1000),
+            failure_code: "account_closed",
+            failure_message: "The bank account has been closed",
+          },
+          stripeAccountId,
+        ),
+        admin,
+      );
+
+      const { data: payout } = await admin
+        .from("payouts")
+        .select("status, failure_code, failure_message")
+        .eq("stripe_payout_id", failedPayoutId)
+        .single();
+      expect(payout?.status).toBe("failed");
+      expect(payout?.failure_message).toBe("The bank account has been closed");
+    });
+
+    it("ignores a payout event for an unknown connected account", async () => {
+      await processStripeEvent(
+        makeEvent(
+          `evt_payout_unknown_${runId}`,
+          "payout.created",
+          {
+            id: `po_unknown_${randomUUID().slice(0, 8)}`,
+            amount: 500,
+            currency: "usd",
+            status: "pending",
+            arrival_date: Math.floor(Date.now() / 1000),
+            failure_code: null,
+            failure_message: null,
+          },
+          "acct_does_not_exist",
+        ),
+        admin,
+      );
+      // No error thrown is the assertion — there's nothing to look up for
+      // an org that doesn't exist, so this should be a silent no-op, same
+      // as every other handler's "if (!org) return" guard.
+    });
+  });
 });

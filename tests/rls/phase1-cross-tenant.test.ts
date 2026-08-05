@@ -22,6 +22,7 @@ describe("Phase 1 cross-tenant RLS isolation", () => {
   let fundraiserAId: string;
   let participantAId: string;
   let transactionAId: string;
+  let payoutAId: string;
 
   beforeAll(async () => {
     userA = await signInTestUser(2);
@@ -73,6 +74,19 @@ describe("Phase 1 cross-tenant RLS isolation", () => {
       action: "test.seed",
       after: { transaction_id: transactionAId },
     });
+
+    const { data: payout } = await admin
+      .from("payouts")
+      .insert({
+        org_id: orgAId,
+        stripe_payout_id: `po_rls_test_${suffix}`,
+        amount_cents: 5000,
+        currency: "usd",
+        status: "paid",
+      })
+      .select("id")
+      .single();
+    payoutAId = payout!.id;
   });
 
   afterAll(async () => {
@@ -154,6 +168,35 @@ describe("Phase 1 cross-tenant RLS isolation", () => {
       .eq("org_id", orgAId);
     expect(error).toBeNull();
     expect(data).toEqual([]);
+  });
+
+  it("hides org A's payouts from a user in org B", async () => {
+    const { data, error } = await userB.client
+      .from("payouts")
+      .select("id")
+      .eq("org_id", orgAId);
+    expect(error).toBeNull();
+    expect(data).toEqual([]);
+  });
+
+  it("lets org A's own admin read org A's payouts", async () => {
+    const { data, error } = await userA.client
+      .from("payouts")
+      .select("id")
+      .eq("id", payoutAId);
+    expect(error).toBeNull();
+    expect(data).toEqual([{ id: payoutAId }]);
+  });
+
+  it("does not let org A's own admin write a payout — service role only", async () => {
+    const { error } = await userA.client.from("payouts").insert({
+      org_id: orgAId,
+      stripe_payout_id: `po_client_attempt_${randomUUID().slice(0, 8)}`,
+      amount_cents: 100,
+      currency: "usd",
+      status: "paid",
+    });
+    expect(error).not.toBeNull();
   });
 
   it("lets a signed-out guest read the active fundraiser (intentional)", async () => {

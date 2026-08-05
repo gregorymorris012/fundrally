@@ -21,19 +21,20 @@ and every fundraiser format must be independently enable-able per tenant
 
 Currently implemented: **Phase 0 (auth, `organizations`, `memberships`,
 RLS), Phase 1 (Stripe Connect onboarding, PaymentIntents, webhook handler,
-`transactions` ledger, refunds), and Phase 2 (the `product` module — shop
-catalog, cart, checkout, admin order history)**. `product` is the only
-`modules.type` with any code behind it — auction/wheel/squares/fifty_fifty/
-golf/item_raffle are Phase 5/6/7 and don't exist yet beyond the enum value.
-Don't assume later-phase tables (`draws`, `module_availability`,
-`compliance_records`, etc.) exist; check `db/schema/` before referencing
-them. `module_availability` is a partial exception — see "Current
-deviations from the build spec" below: chance-based module types (wheel,
-squares, fifty_fifty, item_raffle) can get backend + org-admin management
-UI built now, ahead of Phase 4, gated by that flag and demo-mode only.
-That does **not** suspend Phase 4's compliance gate on real-money
-checkout for those modules — it stays in force regardless of Stripe or
-demo status.
+`transactions` ledger, refunds), Phase 2 (the `product` module — shop
+catalog, cart, checkout, admin order history), and the payout-ledger half
+of Phase 3** (organizer-facing financial dashboard + a read-only mirror
+of Stripe's own payouts — see "Payout ledger (Phase 3)" below). `product`
+is still the only `modules.type` with real gameplay behind it, though
+squares now has real per-square claiming and a genuine server-side draw
+(pulled forward — see "Current deviations from the build spec" below);
+auction/wheel/fifty_fifty/item_raffle beyond squares are Phase 5/6/7 and
+don't exist beyond the enum value + free demo-entry list. Don't assume
+`compliance_records` exists (that's still Phase 4); `draws` and
+`module_availability` **do** exist now — both were pulled forward with
+the chance-modules deviation, not introduced on their original phase
+schedule, so don't assume their shape matches whatever Phase 4/6 of the
+build spec originally described without checking `db/schema/` first.
 
 ## Commands
 
@@ -234,11 +235,50 @@ Elements mount-and-confirm step shared between `DonateForm` and
 `ShopCart` — don't duplicate it a third time if a future module also ends
 in a PaymentIntent confirmation.
 
+### Payout ledger (Phase 3)
+
+`payouts` (`db/schema/payouts.ts`) is a **read-only mirror of Stripe's own
+payout objects**, not a ledger FundRally writes to — this app uses Stripe
+Connect direct charges, so each org's connected account holds its own
+balance and pays itself out to its own bank account on Stripe's schedule.
+FundRally never initiates a payout. `handlePayoutEvent` in
+`webhook-handlers.ts` is the only writer (rule 3), triggered by
+`payout.created`/`updated`/`paid`/`failed`/`canceled` — one handler for
+all five event types, since Stripe delivers the payout's current state on
+every one of them regardless of which type fired, so reading
+`payout.status` directly is simpler than inferring a target status from
+`event.type`. The connected account a Connect-scoped event is *about*
+comes from `event.account` (a top-level field on the event), not
+`event.data.object.id` — that's the payout's own id, not the account's;
+same distinction `handleAccountUpdated` doesn't need since for
+`account.updated` the event's `data.object` already *is* the account.
+
+Unlike `transactions`, `payouts` **is updated in place** — a payout is one
+Stripe object (`stripe_payout_id`) that transitions through states over
+its life, and Stripe's webhooks represent state changes of that same
+object, not new discrete monetary events. Upserted by `stripe_payout_id`
+on every event; `service_role`'s grant on this table is deliberately
+`SELECT, INSERT, UPDATE` only — no `DELETE`, matching the "never removed,
+sometimes updated" semantics at the privilege level, not just by
+convention.
+
+**`payouts.amount_cents` will not reconcile against
+`sum(transactions.net_cents)`** — Stripe's own processing fee (~2.9% +
+30¢) is deducted directly from the connected account's balance and isn't
+reflected anywhere in this app's ledger, so payouts always run lower than
+net raised. That's expected, not a bug; the org-facing page
+(`src/app/org/[orgSlug]/payouts/page.tsx`) says so explicitly rather than
+leaving an organizer to wonder where money went. That page is org-scoped,
+not fundraiser-scoped, since a Stripe payout pools money across every
+fundraiser under one connected account — there's no clean way to
+attribute one payout to a single fundraiser without a further API call
+(`balanceTransactions.list({ payout: po_id })`) this doesn't make yet.
+
 ### RLS testing
 
 `tests/rls/cross-tenant.test.ts` (org/membership tables),
 `tests/rls/phase1-cross-tenant.test.ts` (fundraisers/participants/
-transactions/audit_log), and `tests/rls/phase2-cross-tenant.test.ts`
+transactions/audit_log/payouts), and `tests/rls/phase2-cross-tenant.test.ts`
 (modules/products/orders/order_items, plus the anon-read exceptions) are
 the templates every future table's RLS test should follow: sign in real
 users via the phone-OTP test flow (`[auth.sms.test_otp]` in
@@ -380,14 +420,16 @@ to this stage, not permanent policy:
 
 The build spec (section 8) sequences work as: Phase 0 foundation (done) →
 Phase 1 money spine (done) → Phase 2 first module (done, product/cookie
-sale) → Phase 3 reporting/payouts → Phase 4 compliance gating → Phase 5
-auction → Phase 6 chance modules → Phase 7 golf → Phase 8 comms/sponsors.
-Don't jump ahead on anything not covered by the active deviations above
-— e.g. don't assume a `draws` table exists without checking `db/schema/`
-(Phase 6 is what introduces it). Chance-module UI is the one exception,
-per "Current deviations from the build spec": buildable now, flag-gated
-and demo-mode-only, with Phase 4's real-money compliance gate still
-fully in force.
+sale) → Phase 3 reporting/payouts (payout ledger done — see "Payout
+ledger" above; nothing beyond that from Phase 3 is built) → Phase 4
+compliance gating → Phase 5 auction → Phase 6 chance modules (squares
+pulled forward, see deviations below) → Phase 7 golf → Phase 8
+comms/sponsors. Don't jump ahead on anything not covered by the active
+deviations above — e.g. don't assume `compliance_records` exists (Phase 4
+introduces it). Chance-module UI is the one exception, per "Current
+deviations from the build spec": buildable now, flag-gated and
+demo-mode-only, with Phase 4's real-money compliance gate still fully in
+force.
 
 ### Base UI note
 

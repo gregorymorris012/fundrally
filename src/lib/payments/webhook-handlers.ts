@@ -49,6 +49,13 @@ export async function processStripeEvent(
     case "account.updated":
       await handleAccountUpdated(event, admin);
       break;
+    case "payout.created":
+    case "payout.updated":
+    case "payout.paid":
+    case "payout.failed":
+    case "payout.canceled":
+      await handlePayoutEvent(event, admin);
+      break;
     default:
       break;
   }
@@ -253,5 +260,59 @@ async function handleAccountUpdated(event: Stripe.Event, admin: SupabaseClient) 
     action: "account.updated",
     before,
     after,
+  });
+}
+
+// Phase 3 (build spec section 8: "Reporting + payouts") — a read-only
+// mirror of Stripe's own payout objects, not a ledger FundRally writes to
+// (see db/schema/payouts.ts). One handler for all payout.* event types
+// rather than one per type, because Stripe delivers the payout's current
+// state on every one of them regardless of which type fired — reading
+// payout.status directly is simpler and more robust than trying to infer
+// a target status from event.type. `event.account` (not
+// event.data.object.id, which is the payout's own id) is the connected
+// account a Connect-scoped event is about — same field
+// handleAccountUpdated would use if account.updated events carried it
+// separately from the account object itself.
+async function handlePayoutEvent(event: Stripe.Event, admin: SupabaseClient) {
+  const payout = event.data.object as Stripe.Payout;
+  const stripeAccountId = event.account;
+  if (!stripeAccountId) return;
+
+  const { data: org } = await admin
+    .from("organizations")
+    .select("id")
+    .eq("stripe_account_id", stripeAccountId)
+    .maybeSingle();
+  if (!org) return;
+
+  const { data: existing } = await admin
+    .from("payouts")
+    .select("status")
+    .eq("stripe_payout_id", payout.id)
+    .maybeSingle();
+
+  const after = {
+    org_id: org.id,
+    stripe_payout_id: payout.id,
+    amount_cents: payout.amount,
+    currency: payout.currency,
+    status: payout.status,
+    arrival_date: new Date(payout.arrival_date * 1000).toISOString(),
+    failure_code: payout.failure_code,
+    failure_message: payout.failure_message,
+  };
+
+  const { error } = await admin
+    .from("payouts")
+    .upsert(after, { onConflict: "stripe_payout_id" });
+  if (error) throw error;
+
+  await admin.from("audit_log").insert({
+    org_id: org.id,
+    actor: "stripe_webhook",
+    action: event.type,
+    before: existing ? { status: existing.status } : null,
+    after: { status: after.status, amount_cents: after.amount_cents },
   });
 }

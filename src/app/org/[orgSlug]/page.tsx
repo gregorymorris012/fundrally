@@ -187,6 +187,12 @@ export default async function OrgDashboardPage({
               Connect Stripe
             </a>
           )}
+          <Link
+            href={`/org/${org.slug}/payouts`}
+            className={buttonVariants({ variant: "outline", size: "sm" })}
+          >
+            View payouts
+          </Link>
         </CardContent>
       </Card>
 
