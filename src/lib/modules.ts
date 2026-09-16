@@ -1,7 +1,12 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { createServiceClient } from "@/lib/supabase/service";
+import { requireOrgAdmin } from "@/lib/require-org-admin";
+import type { SquaresConfig } from "@/lib/squares-config";
 
 // Same reasoning as createFundraiser(): plain RLS INSERT policy
 // ("org admins can create modules" in db/migrations/0007_phase2_policies.sql),
@@ -14,6 +19,7 @@ import { createClient } from "@/lib/supabase/server";
 export async function createProductModuleCore(input: {
   orgId: string;
   fundraiserId: string;
+  name?: string | null;
 }) {
   const supabase = await createClient();
   const { error } = await supabase.from("modules").insert({
@@ -21,6 +27,7 @@ export async function createProductModuleCore(input: {
     fundraiser_id: input.fundraiserId,
     type: "product",
     status: "active",
+    name: input.name?.trim().slice(0, 80) || null,
   });
   if (error) throw error;
 }
@@ -30,8 +37,9 @@ export async function createProductModule(formData: FormData) {
   const fundraiserId = String(formData.get("fundraiserId"));
   const orgSlug = String(formData.get("orgSlug"));
   const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const name = String(formData.get("name") ?? "");
 
-  await createProductModuleCore({ orgId, fundraiserId });
+  await createProductModuleCore({ orgId, fundraiserId, name });
 
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
 }
@@ -53,6 +61,7 @@ export async function createChanceModuleCore(input: {
   orgId: string;
   fundraiserId: string;
   type: ChanceModuleType;
+  name?: string | null;
 }) {
   if (!CHANCE_MODULE_TYPES.includes(input.type)) {
     throw new Error(`${input.type} is not a chance-based module type`);
@@ -76,6 +85,7 @@ export async function createChanceModuleCore(input: {
       fundraiser_id: input.fundraiserId,
       type: input.type,
       status: "draft",
+      name: input.name?.trim().slice(0, 80) || null,
     })
     .select("id")
     .single();
@@ -89,14 +99,16 @@ export async function createModule(formData: FormData) {
   const orgSlug = String(formData.get("orgSlug"));
   const fundraiserSlug = String(formData.get("fundraiserSlug"));
   const type = String(formData.get("type"));
+  const name = String(formData.get("name") ?? "");
 
   if (type === "product") {
-    await createProductModuleCore({ orgId, fundraiserId });
+    await createProductModuleCore({ orgId, fundraiserId, name });
   } else {
     await createChanceModuleCore({
       orgId,
       fundraiserId,
       type: type as ChanceModuleType,
+      name,
     });
   }
 
@@ -146,24 +158,190 @@ export async function updateModuleStatus(formData: FormData) {
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
 }
 
-// Squares-only board labels (e.g. team names), stored in modules.config —
-// unused by every other module type so far, so this replaces the whole
-// object rather than merging keys into it. Plain RLS update ("org admins
-// can update modules"), same as updateModuleStatus — no service role
-// needed, this isn't a write path that bypasses a client policy.
-export async function updateSquaresLabels(formData: FormData) {
+// Mirrors deleteFundraiser (src/lib/fundraisers.ts): the "closed and no
+// payment activity" rule is enforced in the RLS USING clause itself
+// (0022_modules_delete_policy.sql), not a check-then-delete in app code —
+// a DELETE blocked by that policy isn't an error, it just matches and
+// deletes 0 rows, so the returned count is what turns "silently did
+// nothing" into a clear message. Cascades through module_entries/draws
+// (both onDelete: "cascade") — fine, since those are the free/no-money
+// records this gate is specifically allowing (a module with any real
+// transactions row can't reach 'closed'-and-deletable in the first place
+// unless that transaction is voided, and even then the transaction row
+// itself still exists and blocks the policy).
+export async function deleteModuleCore(input: { moduleId: string }) {
+  const supabase = await createClient();
+  const { error, count } = await supabase
+    .from("modules")
+    .delete({ count: "exact" })
+    .eq("id", input.moduleId);
+  if (error) throw error;
+  if (!count) {
+    throw new Error(
+      "Can't delete a module unless it's closed with no payment activity.",
+    );
+  }
+}
+
+export async function deleteModule(formData: FormData) {
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+
+  await deleteModuleCore({ moduleId });
+
+  revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules`);
+  revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
+  // The page this action runs from (the module's own admin page) no
+  // longer exists once the module is gone — same reasoning as
+  // deleteFundraiser redirecting off the fundraiser page it ran from.
+  redirect(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules`);
+}
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{6}$/;
+const PAYOUT_STRUCTURES = ["final_only", "half_final", "quarters"] as const;
+
+// Reads the current config so the board-settings/password/lock actions
+// below can merge their own keys into it without clobbering keys another
+// action owns (password/lock live in the same jsonb blob but are edited
+// by separate forms — see the actions below).
+async function readSquaresConfig(moduleId: string): Promise<SquaresConfig> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("modules")
+    .select("config")
+    .eq("id", moduleId)
+    .maybeSingle();
+  if (error || !data) throw new Error("module not found");
+  return (data.config as SquaresConfig) ?? {};
+}
+
+// Board settings: team names/colors, price per square, payout structure.
+// Merges into the existing config rather than overwriting it wholesale
+// (unlike the old updateSquaresLabels) — password/locked/espnEventId are
+// separate concerns living in the same jsonb blob and must survive this
+// form's submit. Plain RLS update ("org admins can update modules"), same
+// as updateModuleStatus — no service role needed, this isn't a write path
+// that bypasses a client policy.
+export async function updateSquaresBoard(formData: FormData) {
   const moduleId = String(formData.get("moduleId"));
   const orgSlug = String(formData.get("orgSlug"));
   const fundraiserSlug = String(formData.get("fundraiserSlug"));
   const rowLabel = String(formData.get("rowLabel") ?? "").trim().slice(0, 40);
   const colLabel = String(formData.get("colLabel") ?? "").trim().slice(0, 40);
+  const nameRaw = formData.get("name");
+  const rowColorRaw = String(formData.get("rowColor") ?? "").trim();
+  const colColorRaw = String(formData.get("colColor") ?? "").trim();
+  const priceRaw = String(formData.get("pricePerSquare") ?? "").trim();
+  const payoutStructureRaw = String(formData.get("payoutStructure") ?? "final_only");
+
+  if (rowColorRaw && !HEX_COLOR_RE.test(rowColorRaw)) {
+    throw new Error("rowColor must be a #rrggbb hex value");
+  }
+  if (colColorRaw && !HEX_COLOR_RE.test(colColorRaw)) {
+    throw new Error("colColor must be a #rrggbb hex value");
+  }
+  let pricePerSquareCents: number | undefined;
+  if (priceRaw) {
+    const cents = Math.round(Number(priceRaw) * 100);
+    if (!Number.isInteger(cents) || cents < 0) {
+      throw new Error("price per square must be a non-negative number");
+    }
+    pricePerSquareCents = cents;
+  }
+  if (!PAYOUT_STRUCTURES.includes(payoutStructureRaw as (typeof PAYOUT_STRUCTURES)[number])) {
+    throw new Error(`invalid payout structure: ${payoutStructureRaw}`);
+  }
+
+  const current = await readSquaresConfig(moduleId);
+  const next: SquaresConfig = {
+    ...current,
+    rowLabel,
+    colLabel,
+    rowColor: rowColorRaw || undefined,
+    colColor: colColorRaw || undefined,
+    pricePerSquareCents,
+    payoutStructure: payoutStructureRaw as SquaresConfig["payoutStructure"],
+  };
+
+  // name is a real column, not part of config (see db/schema/modules.ts).
+  // Present on both the regular "Customize board" submit (a visible,
+  // editable field) and the "Use this game" ESPN action (a hidden input
+  // carrying the matched event's name) — absent only if some caller
+  // forgets the field entirely, in which case leave the existing name
+  // alone rather than blanking it.
+  const updatePayload: { config: SquaresConfig; name?: string | null } = { config: next };
+  if (nameRaw != null) {
+    updatePayload.name = String(nameRaw).trim().slice(0, 80) || null;
+  }
 
   const supabase = await createClient();
-  const { error } = await supabase
-    .from("modules")
-    .update({ config: { rowLabel, colLabel } })
-    .eq("id", moduleId);
+  const { error } = await supabase.from("modules").update(updatePayload).eq("id", moduleId);
   if (error) throw error;
+
+  revalidatePath(
+    `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,
+  );
+  revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+}
+
+// Separate action from updateSquaresBoard since it has a distinct input
+// shape (write-only plaintext in, hash out — never round-trips a password
+// back into a form defaultValue the way labels/colors do). Empty password
+// clears the gate. This is a low-stakes access gate, not a security
+// boundary — see the anon-readability caveat on SquaresConfig above and
+// in db/schema/modules.ts.
+export async function updateJoinPassword(formData: FormData) {
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const password = String(formData.get("password") ?? "");
+
+  const current = await readSquaresConfig(moduleId);
+  const next: SquaresConfig = {
+    ...current,
+    joinPasswordHash: password ? createHash("sha256").update(password).digest("hex") : null,
+  };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("modules").update({ config: next }).eq("id", moduleId);
+  if (error) throw error;
+
+  revalidatePath(
+    `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,
+  );
+}
+
+// Independent of the draft/active/paused/closed lifecycle status — stops
+// new claims without pausing/closing the whole module. The modules-table
+// write itself is a plain RLS update (doesn't need requireOrgAdmin, same
+// as updateModuleStatus), but the audit_log insert has no client policy
+// at all and no RLS to lean on, so requireOrgAdmin is called anyway for
+// defense-in-depth rather than relying solely on the admin page hiding
+// the button.
+export async function toggleSquaresLock(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const locked = String(formData.get("locked")) === "true";
+
+  const userId = await requireOrgAdmin(orgId);
+
+  const current = await readSquaresConfig(moduleId);
+  const next: SquaresConfig = { ...current, locked };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("modules").update({ config: next }).eq("id", moduleId);
+  if (error) throw error;
+
+  const admin = createServiceClient();
+  await admin.from("audit_log").insert({
+    org_id: orgId,
+    actor: userId,
+    action: locked ? "squares.locked" : "squares.unlocked",
+    after: { module_id: moduleId },
+  });
 
   revalidatePath(
     `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,

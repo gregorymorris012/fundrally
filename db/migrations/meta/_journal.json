@@ -134,6 +134,34 @@
       "when": 1785939740160,
       "tag": "0018_payouts_policies",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789493111047,
+      "tag": "0019_bouncy_pixie",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789493116544,
+      "tag": "0020_squares_segments_and_grants",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1789495799771,
+      "tag": "0021_lyrical_rockslide",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1789495805151,
+      "tag": "0022_modules_delete_policy",
+      "breakpoints": true
     }
   ]
 }

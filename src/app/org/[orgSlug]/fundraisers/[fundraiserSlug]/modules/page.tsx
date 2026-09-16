@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { createModule } from "@/lib/modules";
+import { createModule, deleteModule } from "@/lib/modules";
+import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -57,7 +59,7 @@ export default async function ModulesIndexPage({
 
   const { data: fundraiserModules } = await supabase
     .from("modules")
-    .select("id, type, status")
+    .select("id, type, status, name")
     .eq("fundraiser_id", fundraiser.id)
     .order("created_at", { ascending: true });
 
@@ -98,17 +100,36 @@ export default async function ModulesIndexPage({
         <CardContent className="space-y-2">
           {fundraiserModules?.length ? (
             fundraiserModules.map((m) => (
-              <div key={m.id} className="flex items-center justify-between text-sm">
+              <div key={m.id} className="flex items-center justify-between gap-3 text-sm">
                 <span>
-                  {MODULE_TYPE_LABELS[m.type] ?? m.type}{" "}
-                  <span className="text-muted-foreground">({m.status})</span>
+                  {m.name || MODULE_TYPE_LABELS[m.type] || m.type}{" "}
+                  <span className="text-muted-foreground">
+                    ({MODULE_TYPE_LABELS[m.type] ?? m.type}, {m.status})
+                  </span>
                 </span>
-                <Link
-                  href={`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${m.id}`}
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  Manage
-                </Link>
+                <div className="flex shrink-0 items-center gap-2">
+                  {isAdmin && m.status === "closed" && (
+                    <form action={deleteModule}>
+                      <input type="hidden" name="moduleId" value={m.id} />
+                      <input type="hidden" name="orgSlug" value={orgSlug} />
+                      <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                      <ConfirmSubmitButton
+                        type="submit"
+                        variant="outline"
+                        size="sm"
+                        confirmMessage={`Delete "${m.name || MODULE_TYPE_LABELS[m.type] || m.type}"? This can't be undone. Only allowed because it's closed with no payment activity.`}
+                      >
+                        Delete
+                      </ConfirmSubmitButton>
+                    </form>
+                  )}
+                  <Link
+                    href={`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${m.id}`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Manage
+                  </Link>
+                </div>
               </div>
             ))
           ) : (
@@ -143,6 +164,10 @@ export default async function ModulesIndexPage({
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="name">Name (optional)</Label>
+                <Input id="name" name="name" placeholder="e.g. Office Squares — Week 3" />
               </div>
               <Button type="submit">Create</Button>
             </form>

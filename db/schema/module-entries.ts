@@ -1,6 +1,7 @@
 import { integer, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 import { organizations } from "./organizations";
 import { modules } from "./modules";
+import { transactions } from "./transactions";
 
 // Free, no-money participation record for chance-based mini-games (squares,
 // 50/50, item raffle, prize wheel) — CLAUDE.md's active deviation blocks
@@ -31,6 +32,26 @@ export const moduleEntries = pgTable("module_entries", {
   // stops two guests claiming the same square — this column alone doesn't
   // enforce that.
   position: integer("position"),
+  // Squares-only price tracking (still free/no-checkout — see the module
+  // comment above; CLAUDE.md's compliance gate blocks real chance-module
+  // checkout, not the ability to *track* a price an organizer collects in
+  // person). priceCents snapshots modules.config.pricePerSquareCents at
+  // the moment this square was claimed, so a later price change on the
+  // module never retroactively changes what an already-claimed square
+  // owes — same reasoning as order_items snapshotting unit_price_cents
+  // instead of reading live products.price_cents. transactionId links to
+  // the real transactions row created by markSquarePaidCore (via the
+  // existing addOfflineGiftCore, not a new payment path) once an org
+  // admin manually confirms they collected payment. Paid = transactionId
+  // is set. Claimed-but-unpaid = position is set and transactionId isn't.
+  // Released = position is null (nulled, not deleted, so the claim's
+  // history survives for the activity log) — deliberately no separate
+  // status enum column since these two columns plus position already
+  // derive every state without redundant storage.
+  priceCents: integer("price_cents"),
+  transactionId: uuid("transaction_id").references(() => transactions.id, {
+    onDelete: "set null",
+  }),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

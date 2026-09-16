@@ -39,6 +39,7 @@ export function serviceClient(): SupabaseClient {
 //   5-7: tests/rls/phase2-cross-tenant.test.ts
 //   8:   tests/money/webhook-handlers.test.ts
 //   9:   tests/money/purchase-flow.test.ts
+//   10-12: tests/rls/squares-lifecycle.test.ts
 const TEST_PHONES = [
   "+15005550001",
   "+15005550002",
@@ -50,10 +51,15 @@ const TEST_PHONES = [
   "+15005550008",
   "+15005550009",
   "+15005550010",
+  "+15005550011",
+  "+15005550012",
+  "+15005550013",
 ] as const;
 const TEST_OTP = "123456";
 
-export async function signInTestUser(index: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9) {
+export async function signInTestUser(
+  index: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12,
+) {
   const client = anonClient();
   const phone = TEST_PHONES[index];
 
