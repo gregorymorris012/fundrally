@@ -96,6 +96,8 @@ function centsToDollars(cents: number) {
   });
 }
 
+const ESPN_RESULTS_SHOWN = 25;
+
 const ESPN_LEAGUE_LABELS: Record<EspnLeague, string> = {
   nfl: "NFL",
   "college-football": "NCAAF",
@@ -222,6 +224,10 @@ export default async function ModuleAdminPage({
           query: espnQuery,
         })
       : [];
+  // A year-wide, unfiltered search can return thousands of games (college
+  // basketball especially), and every row carries its own form — cap what
+  // renders and tell the admin to narrow by team name for the rest.
+  const espnShown = espnResults.slice(0, ESPN_RESULTS_SHOWN);
 
   const claimedEntries = (entries ?? []).filter((e) => e.position != null);
   const paidCount = claimedEntries.filter((e) => e.transaction_id).length;
@@ -522,6 +528,7 @@ export default async function ModuleAdminPage({
 
                     {espnLeague && (
                       espnResults.length ? (
+                        <>
                         <Table>
                           <TableHeader>
                             <TableRow>
@@ -531,7 +538,7 @@ export default async function ModuleAdminPage({
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {espnResults.map((event) => (
+                            {espnShown.map((event) => (
                               <TableRow key={event.id}>
                                 <TableCell>{event.name}</TableCell>
                                 <TableCell className="text-muted-foreground">
@@ -574,6 +581,13 @@ export default async function ModuleAdminPage({
                             ))}
                           </TableBody>
                         </Table>
+                        {espnResults.length > espnShown.length && (
+                          <p className="text-sm text-muted-foreground">
+                            Showing the first {espnShown.length} of {espnResults.length} games —
+                            type a team name above to narrow the list.
+                          </p>
+                        )}
+                        </>
                       ) : (
                         <p className="text-sm text-muted-foreground">
                           No games found — enter teams manually below.
