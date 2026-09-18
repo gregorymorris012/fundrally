@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { testLoginAction, demoLoginAction } from "@/lib/auth";
+import { DEMO_MODE_ENABLED } from "@/lib/demo-mode";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -194,27 +195,35 @@ export function SignInForm() {
 
         {error && <p className="text-sm text-destructive">{error}</p>}
 
+        {(TEST_LOGIN_ENABLED || DEMO_MODE_ENABLED) && <Separator />}
+
         {TEST_LOGIN_ENABLED && (
-          <>
-            <Separator />
-            <form className="space-y-1.5" action={testLoginAction}>
-              <Button type="submit" variant="secondary" className="w-full">
-                Test login <Badge variant="warning">DEV</Badge>
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Testing only — signs in as a dedicated test account, not a
-                real phone or email.
-              </p>
-            </form>
-            <form className="space-y-1.5" action={demoLoginAction}>
-              <Button type="submit" variant="secondary" className="w-full">
-                View demo <Badge variant="warning">DEV</Badge>
-              </Button>
-              <p className="text-xs text-muted-foreground">
-                Lands on the pre-seeded NuPath 2026 fundraiser dashboard.
-              </p>
-            </form>
-          </>
+          <form className="space-y-1.5" action={testLoginAction}>
+            <Button type="submit" variant="secondary" className="w-full">
+              Test login <Badge variant="warning">DEV</Badge>
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Testing only — signs in as a dedicated test account, not a
+              real phone or email.
+            </p>
+          </form>
+        )}
+
+        {/* Gated on DEMO_MODE_ENABLED alone, not TEST_LOGIN_ENABLED, so a
+            deployment can offer the shared demo without also exposing
+            throwaway Test login accounts. */}
+        {DEMO_MODE_ENABLED && (
+          <form className="space-y-1.5" action={demoLoginAction}>
+            <Button type="submit" variant="secondary" className="w-full">
+              View demo{" "}
+              {process.env.NODE_ENV !== "production" && (
+                <Badge variant="warning">DEV</Badge>
+              )}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              Lands on the pre-seeded NuPath 2026 fundraiser dashboard.
+            </p>
+          </form>
         )}
       </CardContent>
     </Card>
