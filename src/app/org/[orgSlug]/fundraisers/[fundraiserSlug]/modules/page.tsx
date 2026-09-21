@@ -136,7 +136,7 @@ export default async function ModulesIndexPage({
                 <div className="flex shrink-0 items-center gap-2">
                   {isAdmin && m.status === "closed" && modulesWithPayments.has(m.id) && (
                     <span className="text-xs text-muted-foreground">
-                      Has payment activity — can&apos;t delete
+                      Has recorded gifts or payments — can&apos;t delete
                     </span>
                   )}
                   {isAdmin && m.status === "closed" && !modulesWithPayments.has(m.id) && (

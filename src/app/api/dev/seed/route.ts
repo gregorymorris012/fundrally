@@ -113,11 +113,13 @@ export async function POST() {
     .insert({ org_id: org.id, fundraiser_id: fundraiser.id, type: "product", status: "active" })
     .select("id")
     .single();
-  const { data: squaresModule } = await admin
+  // Deliberately no seeded gifts are tagged to this module (see the gifts
+  // list below): any transactions row against a module blocks deleting it
+  // (0022_modules_delete_policy.sql), and a demo squares pool that can't be
+  // closed and deleted to start over defeats the point of a demo.
+  await admin
     .from("modules")
-    .insert({ org_id: org.id, fundraiser_id: fundraiser.id, type: "squares", status: "active" })
-    .select("id")
-    .single();
+    .insert({ org_id: org.id, fundraiser_id: fundraiser.id, type: "squares", status: "active" });
   // Left in 'draft' on purpose — demonstrates the launch button still
   // works in the demo, rather than every module arriving pre-launched.
   await admin
@@ -147,15 +149,15 @@ export async function POST() {
     { donorName: "Maria Chen", amountCents: 5000, method: "cash", moduleId: null, daysAgo: 13 },
     { donorName: "Riverside Hardware", amountCents: 25000, method: "check", moduleId: null, daysAgo: 13 },
     { donorName: "Tom Alvarez", amountCents: 2000, method: "cash", moduleId: productModule?.id ?? null, daysAgo: 12 },
-    { donorName: "Priya Nair", amountCents: 4500, method: "other", moduleId: squaresModule?.id ?? null, daysAgo: 11 },
+    { donorName: "Priya Nair", amountCents: 4500, method: "other", moduleId: null, daysAgo: 11 },
     { donorName: "Jonas Becker", amountCents: 10000, method: "check", moduleId: null, daysAgo: 10 },
     { donorName: "Sunset Diner", amountCents: 15000, method: "in_kind", moduleId: null, daysAgo: 9 },
     { donorName: "Grace Kim", amountCents: 3000, method: "cash", moduleId: productModule?.id ?? null, daysAgo: 9 },
     { donorName: "Wesley Group", amountCents: 20000, method: "check", moduleId: null, daysAgo: 8 },
-    { donorName: "Ana Torres", amountCents: 5000, method: "cash", moduleId: squaresModule?.id ?? null, daysAgo: 7 },
+    { donorName: "Ana Torres", amountCents: 5000, method: "cash", moduleId: null, daysAgo: 7 },
     { donorName: "Devon Price", amountCents: 7500, method: "other", moduleId: productModule?.id ?? null, daysAgo: 6 },
     { donorName: "Helen Brooks", amountCents: 25000, method: "check", moduleId: null, daysAgo: 5 },
-    { donorName: "Marcus Lee", amountCents: 2500, method: "cash", moduleId: squaresModule?.id ?? null, daysAgo: 4 },
+    { donorName: "Marcus Lee", amountCents: 2500, method: "cash", moduleId: null, daysAgo: 4 },
     { donorName: "Yuki Tanaka", amountCents: 6000, method: "cash", moduleId: null, daysAgo: 3 },
     { donorName: "Old Town Bakery", amountCents: 10000, method: "in_kind", moduleId: productModule?.id ?? null, daysAgo: 2 },
     { donorName: "Sarah Whitfield", amountCents: 15000, method: "check", moduleId: null, daysAgo: 1 },
