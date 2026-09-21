@@ -30,6 +30,7 @@
   --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
   --color-selection: var(--selection);
+  --color-card-outline: var(--card-outline);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
@@ -77,8 +78,16 @@
   --destructive: oklch(0.6305 0.2162 26);
   --success: oklch(0.6747 0.2069 142.07);
   --warning: oklch(0.7779 0.1687 69.79);
-  --border: oklch(0.912 0.008 251);
-  --input: oklch(0.912 0.008 251);
+  /* Lines: strong enough to see on a bright, high-contrast display (the
+     previous 0.912 lightness all but vanished on a Mac). --border drives
+     dividers, outline buttons and the squares grid lines; --input drives
+     text-field borders, which need to stand out most. */
+  --border: oklch(0.84 0.02 260);
+  --input: oklch(0.74 0.035 262);
+  /* The outline drawn around every Card / section box. Deep blue (same hue
+     as --selection) so sections are clearly separated site-wide. To soften
+     it, add an alpha, e.g. oklch(0.379 0.146 265.5 / 0.6). */
+  --card-outline: oklch(0.379 0.146 265.5);
   /* Focus rings and "selected" outlines: a deep blue, deliberately not the
      brand orange (--primary) and not a light blue, so a selected card,
      square, or focused field stands out from the surrounding lines. */
@@ -118,8 +127,9 @@
   --destructive: oklch(0.704 0.191 22.216);
   --success: oklch(0.7 0.19 142);
   --warning: oklch(0.8 0.16 70);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --border: oklch(1 0 0 / 16%);
+  --input: oklch(1 0 0 / 26%);
+  --card-outline: oklch(0.62 0.17 262 / 0.75);
   --ring: oklch(0.62 0.17 262);
   --selection: oklch(0.62 0.17 262);
   --chart-1: oklch(0.87 0 0);
