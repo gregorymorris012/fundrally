@@ -344,6 +344,23 @@ limiter working as intended, not a bug.)
   `webhook-handlers.ts` — which `tests/money/` imports directly — does not
   have that import, even though every other server-only module in this
   repo does. Don't add it there.
+- **A `"use server"` module may only export async functions.** Exporting a
+  constant from `src/lib/modules.ts` passed `tsc` and lint but failed the
+  production build ("Export … doesn't exist in target module"). Keep
+  shared constants unexported or in a separate non-`"use server"` file.
+- **Local `next build` needs Node >= 20.9; this machine's default is
+  Node 18**, and `tsc`/lint don't catch build-only failures like the one
+  above. Run
+  `NEXT_PUBLIC_SUPABASE_URL=http://127.0.0.1:54321 NEXT_PUBLIC_SUPABASE_ANON_KEY=x SUPABASE_SERVICE_ROLE_KEY=x npx -y node@22 ./node_modules/next/dist/bin/next build`
+  before pushing (the dummy values are needed because page-data collection
+  constructs the Supabase client). Pushing to `main` auto-deploys to
+  production.
+- **ESPN's scoreboard 400s on `dates=YYYYMMDD-YYYYMMDD`** (verified
+  September 2026, at every span) — the squares game search
+  (`src/lib/sports-data/espn.ts`) therefore queries by month
+  (`dates=YYYYMM`), and college football by season week + postseason (its
+  date-based queries silently cap at 25 events). It's an undocumented API
+  that can change again; failures deliberately fall back to manual entry.
 - **App code never imports `db/client.ts`.** Despite it existing (for
   potential future scripts/seeding), all reads/writes go through
   `src/lib/supabase/{client,server,service}.ts` — an RLS-scoped
@@ -371,9 +388,8 @@ that weren't obvious setting this up:
   seeded with placeholders earlier to unblock a build) — but don't count
   on that; verify actual values after connecting a new integration rather
   than assuming a name match. `DATABASE_URL` isn't created by the
-  integration at all; source it from `POSTGRES_URL_NON_POOLING` (direct
-  connection — better than the pooled `POSTGRES_URL` for one-shot
-  migration runs, which can be finicky through a transaction-mode pooler).
+  integration at all (for migrations, see the Session pooler recipe below —
+  the transaction-mode pooler is the one to avoid for one-shot runs).
 - **`NEXT_PUBLIC_*` vars are baked into the client bundle at build time**,
   not read at request time. Updating them in Vercel's dashboard does
   nothing to an already-built deployment — you need a fresh `vercel --prod`
@@ -384,8 +400,44 @@ that weren't obvious setting this up:
   at that process as the literal string `[SENSITIVE]`, not the real value
   (surfaced as a Postgres "Invalid URL" error). Applying migrations to a
   real hosted database from this environment doesn't work as a result;
-  that has to be run by a human in a real terminal (`vercel env pull` +
-  `drizzle-kit migrate` with the pulled `DATABASE_URL`).
+  that has to be run by a human in a real terminal.
+- **`vercel env pull` does not produce usable database values.** The pulled
+  `.env.production.local` had the literal text `[SENSITIVE]` for
+  `DATABASE_URL`, `POSTGRES_URL*`, `SUPABASE_SERVICE_ROLE_KEY`, and even
+  `NEXT_PUBLIC_SUPABASE_URL` — and Next.js auto-loads that file, so it also
+  breaks a local `next build` ("Invalid supabaseUrl"). Don't keep one
+  around. This supersedes the earlier "env pull + drizzle-kit migrate"
+  recipe.
+- **Applying migrations to production** (a human, in their own terminal):
+  take the **Session pooler** URI from Supabase dashboard → Connect (host
+  `aws-0-<region>.pooler.supabase.com`, port 5432, user `postgres.<ref>`;
+  fill in the real password, URL-encoding special characters), then
+  `read -rs -p "URI: " DATABASE_URL; echo; export DATABASE_URL` **as its own
+  pasted line** (a `read` inside a multi-line paste swallows the next line,
+  `DATABASE_URL` never gets exported, and `drizzle.config.ts` silently falls
+  back to `.env.local` — i.e. the *local* database), check the host, then
+  `npx drizzle-kit migrate`. An exported `DATABASE_URL` beats `.env.local`
+  (dotenv doesn't override): "injected env (8)" vs "(9)" in the output is
+  the tell. `drizzle-kit migrate` prints only two harmless NOTICEs and **no
+  success line** — verify in the Supabase SQL editor that
+  `select count(*) from drizzle.__drizzle_migrations` equals the number of
+  entries in `db/migrations/meta/_journal.json`.
+- **The public demo (NuPath 2026).** "View demo" on `/auth/sign-in` signs
+  into the seeded `nupath-2026-demo` org as `demo-owner@fundrally.test`. It
+  needs `NEXT_PUBLIC_DEMO_MODE=true` on Production (a build-time flag —
+  redeploy after changing it; the button is gated on `DEMO_MODE_ENABLED`
+  alone, deliberately *not* on Test login). That flag also softens the
+  "connect Stripe" messaging on every org's dashboard. The org is created
+  by `POST /api/dev/seed`, which wipes and recreates only that slug and is
+  **unauthenticated**, so it's closed in production by default. To
+  (re)seed: `vercel env add ENABLE_DEV_SEED production` (value `true`) →
+  `vercel --prod --yes` → `curl -X POST https://fundrally.vercel.app/api/dev/seed`
+  → `vercel env rm ENABLE_DEV_SEED production --yes` → `vercel --prod --yes`
+  → confirm the same `curl` now returns 403. Don't leave the flag on, and
+  don't "test" the route by POSTing to it — that reseeds. Seeded gifts must
+  not be tagged to the squares module: any `transactions` row against a
+  module blocks deleting it (`0022_modules_delete_policy.sql`), which would
+  make the demo pool impossible to close-and-delete to start over.
 - **Supabase Auth's Site URL / Redirect URLs are dashboard-only config**,
   not something in a migration — set under Authentication → URL
   Configuration to the production domain plus `/auth/callback` and
