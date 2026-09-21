@@ -229,6 +229,15 @@ export default async function ModuleAdminPage({
   // renders and tell the admin to narrow by team name for the rest.
   const espnShown = espnResults.slice(0, ESPN_RESULTS_SHOWN);
 
+  // Same test the delete policy applies (0022_modules_delete_policy.sql): any
+  // transactions row against this module — offline gifts included — blocks
+  // deletion, so don't offer a Delete button that can only fail.
+  const { count: paymentCount } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("module_id", module_.id);
+  const hasPaymentActivity = (paymentCount ?? 0) > 0;
+
   const claimedEntries = (entries ?? []).filter((e) => e.position != null);
   const paidCount = claimedEntries.filter((e) => e.transaction_id).length;
   const unpaidCount = claimedEntries.length - paidCount;
@@ -313,19 +322,26 @@ export default async function ModuleAdminPage({
                 <p className="text-sm text-muted-foreground">
                   This module is closed.
                 </p>
-                <form action={deleteModule}>
-                  <input type="hidden" name="moduleId" value={module_.id} />
-                  <input type="hidden" name="orgSlug" value={orgSlug} />
-                  <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
-                  <ConfirmSubmitButton
-                    type="submit"
-                    variant="outline"
-                    size="sm"
-                    confirmMessage={`Delete "${displayTitle}"? This can't be undone. Only allowed because it's closed with no payment activity.`}
-                  >
-                    Delete
-                  </ConfirmSubmitButton>
-                </form>
+                {hasPaymentActivity ? (
+                  <p className="text-xs text-muted-foreground">
+                    Has payment activity (offline gifts count), so it can&apos;t be
+                    deleted. Create a new module to start fresh.
+                  </p>
+                ) : (
+                  <form action={deleteModule}>
+                    <input type="hidden" name="moduleId" value={module_.id} />
+                    <input type="hidden" name="orgSlug" value={orgSlug} />
+                    <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                    <ConfirmSubmitButton
+                      type="submit"
+                      variant="outline"
+                      size="sm"
+                      confirmMessage={`Delete "${displayTitle}"? This can't be undone.`}
+                    >
+                      Delete
+                    </ConfirmSubmitButton>
+                  </form>
+                )}
               </>
             )}
           </CardContent>

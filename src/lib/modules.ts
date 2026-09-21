@@ -169,6 +169,9 @@ export async function updateModuleStatus(formData: FormData) {
 // transactions row can't reach 'closed'-and-deletable in the first place
 // unless that transaction is voided, and even then the transaction row
 // itself still exists and blocks the policy).
+export const MODULE_DELETE_BLOCKED_MESSAGE =
+  "Can't delete a module unless it's closed with no payment activity.";
+
 export async function deleteModuleCore(input: { moduleId: string }) {
   const supabase = await createClient();
   const { error, count } = await supabase
@@ -176,11 +179,7 @@ export async function deleteModuleCore(input: { moduleId: string }) {
     .delete({ count: "exact" })
     .eq("id", input.moduleId);
   if (error) throw error;
-  if (!count) {
-    throw new Error(
-      "Can't delete a module unless it's closed with no payment activity.",
-    );
-  }
+  if (!count) throw new Error(MODULE_DELETE_BLOCKED_MESSAGE);
 }
 
 export async function deleteModule(formData: FormData) {
@@ -188,7 +187,24 @@ export async function deleteModule(formData: FormData) {
   const orgSlug = String(formData.get("orgSlug"));
   const fundraiserSlug = String(formData.get("fundraiserSlug"));
 
-  await deleteModuleCore({ moduleId });
+  // The RLS policy refusing the delete is an expected outcome (the module
+  // has payment activity), not a crash — bounce back to the module list
+  // with a flag it turns into a message, rather than letting the throw
+  // surface as Next's generic "This page couldn't load" error page.
+  // redirect() throws, so it has to sit outside the try.
+  let blocked = false;
+  try {
+    await deleteModuleCore({ moduleId });
+  } catch (err) {
+    if (err instanceof Error && err.message === MODULE_DELETE_BLOCKED_MESSAGE) {
+      blocked = true;
+    } else {
+      throw err;
+    }
+  }
+  if (blocked) {
+    redirect(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules?deleteBlocked=1`);
+  }
 
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules`);
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);

@@ -7,6 +7,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
 const MODULE_TYPE_LABELS: Record<string, string> = {
   product: "Product sale",
@@ -22,10 +23,13 @@ const MODULE_TYPE_LABELS: Record<string, string> = {
 // "Create module" form used to live there directly.
 export default async function ModulesIndexPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orgSlug: string; fundraiserSlug: string }>;
+  searchParams: Promise<{ deleteBlocked?: string }>;
 }) {
   const { orgSlug, fundraiserSlug } = await params;
+  const { deleteBlocked } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -67,6 +71,17 @@ export default async function ModulesIndexPage({
   // "Current deviations from the build spec") — drives which types show
   // up as creatable below. Product is always creatable; it predates
   // module_availability entirely.
+  // Closed modules with any transactions row can't be deleted (RLS policy in
+  // 0022_modules_delete_policy.sql) — offline gifts logged against a module
+  // count. Look that up so the Delete button only shows when it can work.
+  const closedModuleIds = (fundraiserModules ?? [])
+    .filter((m) => m.status === "closed")
+    .map((m) => m.id);
+  const { data: paymentRows } = closedModuleIds.length
+    ? await supabase.from("transactions").select("module_id").in("module_id", closedModuleIds)
+    : { data: [] };
+  const modulesWithPayments = new Set((paymentRows ?? []).map((r) => r.module_id));
+
   const { data: availabilityRows } = await supabase
     .from("module_availability")
     .select("module_type, enabled")
@@ -93,6 +108,17 @@ export default async function ModulesIndexPage({
         </Link>
       </div>
 
+      {deleteBlocked && (
+        <Alert variant="warning">
+          <AlertTitle>That module can&apos;t be deleted</AlertTitle>
+          <AlertDescription>
+            It has payment activity recorded against it — offline gifts count.
+            Modules with money history are kept so the ledger stays complete.
+            Create a new module to start fresh.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <Card>
         <CardHeader>
           <CardTitle>Modules</CardTitle>
@@ -108,7 +134,12 @@ export default async function ModulesIndexPage({
                   </span>
                 </span>
                 <div className="flex shrink-0 items-center gap-2">
-                  {isAdmin && m.status === "closed" && (
+                  {isAdmin && m.status === "closed" && modulesWithPayments.has(m.id) && (
+                    <span className="text-xs text-muted-foreground">
+                      Has payment activity — can&apos;t delete
+                    </span>
+                  )}
+                  {isAdmin && m.status === "closed" && !modulesWithPayments.has(m.id) && (
                     <form action={deleteModule}>
                       <input type="hidden" name="moduleId" value={m.id} />
                       <input type="hidden" name="orgSlug" value={orgSlug} />
@@ -117,7 +148,7 @@ export default async function ModulesIndexPage({
                         type="submit"
                         variant="outline"
                         size="sm"
-                        confirmMessage={`Delete "${m.name || MODULE_TYPE_LABELS[m.type] || m.type}"? This can't be undone. Only allowed because it's closed with no payment activity.`}
+                        confirmMessage={`Delete "${m.name || MODULE_TYPE_LABELS[m.type] || m.type}"? This can't be undone.`}
                       >
                         Delete
                       </ConfirmSubmitButton>
