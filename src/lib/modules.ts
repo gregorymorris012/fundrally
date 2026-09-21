@@ -327,7 +327,7 @@ export async function updateSquaresBoard(formData: FormData) {
   // the hash keeps the admin at the Customize board card instead of the
   // top of a long page.
   redirect(
-    `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}?boardSaved=1#customize-board`,
+    `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}?tab=settings&boardSaved=1#customize-board`,
   );
 }
 
@@ -409,7 +409,7 @@ export async function updatePayoutRules(formData: FormData) {
   const fundraiserSlug = String(formData.get("fundraiserSlug"));
   const back = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`;
   const fail = (message: string): never =>
-    redirect(`${back}?payoutError=${encodeURIComponent(message)}#payouts`);
+    redirect(`${back}?tab=settings&payoutError=${encodeURIComponent(message)}#payouts`);
 
   const userId = await requireOrgAdmin(orgId);
 
@@ -447,7 +447,7 @@ export async function updatePayoutRules(formData: FormData) {
 
   revalidatePath(back);
   revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
-  redirect(`${back}?payoutsSaved=1#payouts`);
+  redirect(`${back}?tab=settings&payoutsSaved=1#payouts`);
 }
 
 // Manual scoring: the organizer enters the score at the end of a period
@@ -464,7 +464,7 @@ export async function saveSquaresScore(formData: FormData) {
   const period = String(formData.get("period")) as SquaresPeriod;
   const back = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`;
   const fail = (message: string): never =>
-    redirect(`${back}?scoreError=${encodeURIComponent(message)}#scores`);
+    redirect(`${back}?tab=grid&scoreError=${encodeURIComponent(message)}#scores`);
 
   const userId = await requireOrgAdmin(orgId);
 
@@ -524,5 +524,5 @@ export async function saveSquaresScore(formData: FormData) {
 
   revalidatePath(back);
   revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
-  redirect(`${back}?scoreSaved=1#scores`);
+  redirect(`${back}?tab=grid&scoreSaved=1#scores`);
 }

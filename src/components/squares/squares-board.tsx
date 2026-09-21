@@ -30,6 +30,7 @@ export function SquaresBoard({
   showNumbers = true,
   selectedPosition = null,
   winners = [],
+  onSquareClick,
   claimHrefBase = null,
   claimHrefSuffix = "",
 }: {
@@ -46,6 +47,10 @@ export function SquaresBoard({
   // Squares that won a period, e.g. { position: 47, label: "Half" }. A
   // square can win more than one period.
   winners?: { position: number; label: string }[];
+  // Admin board: every square (open or claimed) becomes clickable. Only
+  // usable from another client component — functions can't cross the
+  // server -> client boundary.
+  onSquareClick?: (position: number) => void;
   // Public board: open squares link to `${claimHrefBase}${position}${suffix}`.
   // Null means open squares aren't clickable (admin view, or pool locked).
   // A base string rather than a function because this component's props
@@ -162,7 +167,7 @@ export function SquaresBoard({
             // neighbouring squares' borders can't cover it.
             (isHovered || isSelected) && "z-10 ring-2 ring-selection ring-inset",
             isSelected && "bg-selection/15",
-            href && "cursor-pointer",
+            (href || onSquareClick) && "cursor-pointer",
           );
 
           const content = (
@@ -224,10 +229,23 @@ export function SquaresBoard({
             <div
               key={position}
               // Focusable so a tap/tab reveals the name on touch devices,
-              // where there is no hover.
-              tabIndex={entry ? 0 : undefined}
+              // where there is no hover — and, when clickable, so the
+              // keyboard can select a square.
+              tabIndex={entry || onSquareClick ? 0 : undefined}
+              role={onSquareClick ? "button" : undefined}
               aria-label={entry ? `Square ${label}: ${entry.name}` : `Square ${label}: open`}
               onFocus={() => setHover(position)}
+              onClick={onSquareClick ? () => onSquareClick(position) : undefined}
+              onKeyDown={
+                onSquareClick
+                  ? (e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onSquareClick(position);
+                      }
+                    }
+                  : undefined
+              }
               {...common}
             >
               {content}

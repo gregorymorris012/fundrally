@@ -21,8 +21,11 @@ import {
 } from "@/lib/squares-config";
 import { deriveWinners, resolveRules } from "@/lib/squares-rules";
 import { PayoutRulesForm } from "@/components/squares/payout-rules-form";
-import { WinnersTable } from "@/components/squares/rules-and-payouts";
+import { RulesAndPayouts, WinnersTable } from "@/components/squares/rules-and-payouts";
+import { AdminSquaresBoard } from "@/components/squares/admin-squares-board";
+import { cn } from "@/lib/utils";
 import {
+  assignSquareAsAdmin,
   markSquarePaid,
   voidSquarePayment,
   releaseSquare,
@@ -35,7 +38,6 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { SquaresBoard } from "@/components/squares/squares-board";
 import { Separator } from "@/components/ui/separator";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import {
@@ -111,11 +113,24 @@ export default async function ModuleAdminPage({
     payoutError?: string;
     scoreSaved?: string;
     scoreError?: string;
+    tab?: string;
+    assigned?: string;
+    assignError?: string;
   }>;
 }) {
   const { orgSlug, fundraiserSlug, moduleId } = await params;
-  const { espnLeague, espnQuery, boardSaved, payoutsSaved, payoutError, scoreSaved, scoreError } =
-    await searchParams;
+  const {
+    espnLeague,
+    espnQuery,
+    boardSaved,
+    payoutsSaved,
+    payoutError,
+    scoreSaved,
+    scoreError,
+    tab: tabParam,
+    assigned,
+    assignError,
+  } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -238,6 +253,41 @@ export default async function ModuleAdminPage({
   const claimedEntries = (entries ?? []).filter((e) => e.position != null);
   const holders = new Map(claimedEntries.map((e) => [e.position as number, e.display_name]));
   const winners = deriveWinners(squaresConfig, draw, holders);
+
+  // Squares admin is split into tabs (?tab=). Settings is admin-only, so a
+  // non-admin asking for it lands on the grid instead.
+  const TABS = [
+    { key: "grid", label: "Grid" },
+    { key: "players", label: `Players (${claimedEntries.length})` },
+    ...(isAdmin ? [{ key: "settings", label: "Settings" }] : []),
+    { key: "rules", label: "Rules" },
+    { key: "share", label: "Share" },
+  ];
+  const tab = TABS.some((t) => t.key === tabParam) ? (tabParam as string) : "grid";
+  const modulePath = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${module_.id}`;
+  const tabHref = (key: string) => `${modulePath}?tab=${key}`;
+
+  const setupSteps = [
+    {
+      label: "Choose the game and team colors",
+      done: !!(squaresConfig.colLabel && squaresConfig.rowLabel),
+      href: `${tabHref("settings")}#customize-board`,
+    },
+    {
+      label: "Set the price per square",
+      done: !!squaresConfig.pricePerSquareCents,
+      href: `${tabHref("settings")}#customize-board`,
+    },
+    {
+      label: "Review the payouts",
+      done: squaresConfig.splitBps !== undefined || squaresConfig.charityBps !== undefined,
+      href: `${tabHref("settings")}#payouts`,
+    },
+    { label: "Launch the pool", done: module_.status !== "draft", href: "#lifecycle" },
+    { label: "Share the invite link", done: claimedEntries.length > 0, href: tabHref("share") },
+    { label: "Lock the board and draw the numbers", done: !!draw, href: "#draw" },
+  ];
+  const setupDone = setupSteps.filter((step) => step.done).length;
   const paidCount = claimedEntries.filter((e) => e.transaction_id).length;
   const unpaidCount = claimedEntries.length - paidCount;
   const collectedCents = claimedEntries
@@ -295,7 +345,7 @@ export default async function ModuleAdminPage({
       )}
 
       {isAdmin && (
-        <Card>
+        <Card id="lifecycle" className="scroll-mt-6">
           <CardHeader>
             <CardTitle>Lifecycle</CardTitle>
           </CardHeader>
@@ -486,14 +536,78 @@ export default async function ModuleAdminPage({
       )}
 
       {isSquares && (
-        <div className="grid items-start gap-6 lg:grid-cols-[1fr_320px]">
-          {/* Main column: the board itself comes first, then its
-              configuration, then operational detail — the reverse of a
-              settings-first layout, so the thing an organizer actually
-              cares about (the board) is immediately visible instead of
-              buried under every settings card. */}
-          <div className="flex min-w-0 flex-col gap-6">
-            {isAdmin && (
+        <div className="flex flex-col gap-6">
+          <nav className="-mb-2 flex gap-1 overflow-x-auto border-b border-border" aria-label="Pool sections">
+            {TABS.map((t) => (
+              <Link
+                key={t.key}
+                href={tabHref(t.key)}
+                aria-current={tab === t.key ? "page" : undefined}
+                className={cn(
+                  "-mb-px shrink-0 border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
+                  tab === t.key
+                    ? "border-selection text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t.label}
+              </Link>
+            ))}
+          </nav>
+
+          {tab === "grid" && isAdmin && setupDone < setupSteps.length && (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Set up your pool ({setupDone} of {setupSteps.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ol className="space-y-1.5">
+                  {setupSteps.map((step) => (
+                    <li key={step.label}>
+                      <Link
+                        href={step.href}
+                        className="flex items-center gap-2.5 text-sm hover:underline"
+                      >
+                        <span
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold",
+                            step.done
+                              ? "border-success bg-success text-white"
+                              : "border-border text-transparent",
+                          )}
+                          aria-hidden
+                        >
+                          ✓
+                        </span>
+                        <span className={step.done ? "text-muted-foreground line-through" : "text-foreground"}>
+                          {step.label}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          )}
+
+          {tab === "rules" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                This is what players see on the public page. It&apos;s generated from
+                your settings{isAdmin ? " — change the payouts under Settings" : ""}.
+              </p>
+              <RulesAndPayouts
+                config={squaresConfig}
+                colLabel={squaresConfig.colLabel || "Top team"}
+                rowLabel={squaresConfig.rowLabel || "Side team"}
+              />
+            </>
+          )}
+
+          <div className="contents">
+            {tab === "settings" && isAdmin && (
               <Card id="customize-board" className="scroll-mt-6">
                 <CardHeader>
                   <CardTitle>Customize board</CardTitle>
@@ -522,6 +636,7 @@ export default async function ModuleAdminPage({
                       method="get"
                       className="flex flex-wrap items-end gap-3"
                     >
+                      <input type="hidden" name="tab" value="settings" />
                       <div className="space-y-1.5">
                         <Label htmlFor="espnLeague">League</Label>
                         <select
@@ -734,7 +849,8 @@ export default async function ModuleAdminPage({
               </Card>
             )}
 
-            <Card>
+            {tab === "grid" && (
+            <Card id="board" className="scroll-mt-6">
               <CardHeader>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <CardTitle>
@@ -758,7 +874,18 @@ export default async function ModuleAdminPage({
                 </div>
 
                 <div className="space-y-2">
-                  <SquaresBoard
+                  {assigned && (
+                    <Alert variant="success">
+                      <AlertTitle>Square {assigned} assigned</AlertTitle>
+                    </Alert>
+                  )}
+                  {assignError && (
+                    <Alert variant="destructive">
+                      <AlertTitle>Couldn&apos;t assign that square</AlertTitle>
+                      <AlertDescription>{assignError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <AdminSquaresBoard
                     colLabel={squaresConfig.colLabel || "Top team"}
                     rowLabel={squaresConfig.rowLabel || "Side team"}
                     colColor={squaresConfig.colColor}
@@ -768,12 +895,31 @@ export default async function ModuleAdminPage({
                     winners={winners
                       .filter((w) => w.position != null)
                       .map((w) => ({ position: w.position as number, label: PERIOD_SHORT_LABELS[w.period] }))}
+                    showNumbers={squaresConfig.showSquareNumbers !== false}
                     entries={claimedEntries.map((e) => ({
+                      id: e.id,
                       position: e.position as number,
                       name: e.display_name,
-                      status: e.transaction_id ? "paid" : "unpaid",
+                      paid: !!e.transaction_id,
                     }))}
-                    showNumbers={squaresConfig.showSquareNumbers !== false}
+                    ids={{
+                      orgId: org.id,
+                      fundraiserId: fundraiser.id,
+                      moduleId: module_.id,
+                      orgSlug,
+                      fundraiserSlug,
+                    }}
+                    priceLabel={
+                      squaresConfig.pricePerSquareCents
+                        ? centsToDollars(squaresConfig.pricePerSquareCents)
+                        : null
+                    }
+                    actions={{
+                      assign: assignSquareAsAdmin,
+                      markPaid: markSquarePaid,
+                      voidPayment: voidSquarePayment,
+                      release: releaseSquare,
+                    }}
                   />
                   <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
@@ -789,8 +935,9 @@ export default async function ModuleAdminPage({
                 </div>
               </CardContent>
             </Card>
+            )}
 
-            {isAdmin && (
+            {tab === "settings" && isAdmin && (
               <Card id="payouts" className="scroll-mt-6">
                 <CardHeader>
                   <CardTitle>Payouts</CardTitle>
@@ -825,7 +972,8 @@ export default async function ModuleAdminPage({
               </Card>
             )}
 
-            <Card>
+            {tab === "grid" && (
+            <Card id="draw" className="scroll-mt-6">
               <CardHeader>
                 <CardTitle>Draw numbers</CardTitle>
               </CardHeader>
@@ -862,7 +1010,9 @@ export default async function ModuleAdminPage({
                 )}
               </CardContent>
             </Card>
+            )}
 
+            {tab === "grid" && (
             <Card id="scores" className="scroll-mt-6">
               <CardHeader>
                 <CardTitle>Scores &amp; winners</CardTitle>
@@ -955,7 +1105,9 @@ export default async function ModuleAdminPage({
                 />
               </CardContent>
             </Card>
+            )}
 
+            {tab === "players" && (
             <Card>
               <CardHeader>
                 <CardTitle>Reserved squares</CardTitle>
@@ -1071,8 +1223,9 @@ export default async function ModuleAdminPage({
                 )}
               </CardContent>
             </Card>
+            )}
 
-            {activity && activity.length > 0 && (
+            {tab === "players" && activity && activity.length > 0 && (
               <Card>
                 <CardHeader>
                   <CardTitle>Activity log</CardTitle>
@@ -1091,10 +1244,8 @@ export default async function ModuleAdminPage({
             )}
           </div>
 
-          {/* Sidebar: persistent status + quick actions, independent of
-              how far you've scrolled the main column. */}
-          <div className="flex flex-col gap-6">
-            {isAdmin && (
+          <div className="contents">
+            {tab === "settings" && isAdmin && (
               <Card>
                 <CardHeader>
                   <CardTitle>Access</CardTitle>
@@ -1153,6 +1304,7 @@ export default async function ModuleAdminPage({
               </Card>
             )}
 
+            {tab === "share" && (
             <Card>
               <CardHeader>
                 <CardTitle>Pool details</CardTitle>
@@ -1194,6 +1346,7 @@ export default async function ModuleAdminPage({
                 </div>
               </CardContent>
             </Card>
+            )}
           </div>
         </div>
       )}

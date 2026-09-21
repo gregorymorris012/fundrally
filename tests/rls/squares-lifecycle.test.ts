@@ -6,6 +6,7 @@ import {
   signInTestUser,
 } from "../helpers";
 import {
+  assignSquareCore,
   joinModuleCore,
   markSquarePaidCore,
   voidSquarePaymentCore,
@@ -303,6 +304,100 @@ describe("squares lifecycle", () => {
 
     const { data: allDraws } = await admin.from("draws").select("id").eq("module_id", moduleAId);
     expect(allDraws).toHaveLength(1);
+  });
+
+  it("lets an organizer assign squares by hand, ignoring the lock and password, and optionally mark them paid", async () => {
+    const admin = serviceClient();
+    await setConfig(moduleAId, {
+      pricePerSquareCents: 2000,
+      locked: true,
+      joinPasswordHash: createHash("sha256").update("secret").digest("hex"),
+    });
+
+    // Guests are blocked by the lock...
+    await expect(
+      joinModuleCore({ orgId: orgAId, moduleId: moduleAId, displayName: "Guest", position: 70, password: "secret" }),
+    ).rejects.toThrow(/locked/i);
+
+    // ...the organizer isn't, and the price is snapshotted like any claim.
+    const late = await assignSquareCore({
+      orgId: orgAId,
+      fundraiserId: fundraiserAId,
+      moduleId: moduleAId,
+      position: 70,
+      displayName: "  Late Joiner  ",
+      actor: userA.userId,
+    });
+    expect(late.paidError).toBeNull();
+    const { data: lateRow } = await admin
+      .from("module_entries")
+      .select("display_name, position, price_cents, transaction_id")
+      .eq("id", late.entryId)
+      .single();
+    expect(lateRow).toMatchObject({
+      display_name: "Late Joiner",
+      position: 70,
+      price_cents: 2000,
+      transaction_id: null,
+    });
+
+    // Assign + mark paid in one step writes a real offline-gift row tied to the module.
+    const paid = await assignSquareCore({
+      orgId: orgAId,
+      fundraiserId: fundraiserAId,
+      moduleId: moduleAId,
+      position: 71,
+      displayName: "Cash Payer",
+      markPaid: true,
+      method: "cash",
+      actor: userA.userId,
+    });
+    expect(paid.paidError).toBeNull();
+    const { data: paidRow } = await admin
+      .from("module_entries")
+      .select("transaction_id")
+      .eq("id", paid.entryId)
+      .single();
+    expect(paidRow?.transaction_id).toBeTruthy();
+    const { data: tx } = await admin
+      .from("transactions")
+      .select("kind, gross_cents, module_id")
+      .eq("id", paidRow!.transaction_id)
+      .single();
+    expect(tx).toMatchObject({ kind: "donation", gross_cents: 2000, module_id: moduleAId });
+
+    // A taken square, a bad square, and a blank name are all refused.
+    await expect(
+      assignSquareCore({ orgId: orgAId, fundraiserId: fundraiserAId, moduleId: moduleAId, position: 70, displayName: "Dup", actor: userA.userId }),
+    ).rejects.toThrow(/already taken/i);
+    await expect(
+      assignSquareCore({ orgId: orgAId, fundraiserId: fundraiserAId, moduleId: moduleAId, position: 100, displayName: "X", actor: userA.userId }),
+    ).rejects.toThrow(/between 1 and 100/i);
+    await expect(
+      assignSquareCore({ orgId: orgAId, fundraiserId: fundraiserAId, moduleId: moduleAId, position: 72, displayName: "   ", actor: userA.userId }),
+    ).rejects.toThrow(/name/i);
+
+    // Org isolation: an admin of org B can't assign into org A's pool, and
+    // nothing is written when they try.
+    await expect(
+      assignSquareCore({ orgId: orgBId, fundraiserId: fundraiserAId, moduleId: moduleAId, position: 72, displayName: "Intruder", actor: userB.userId }),
+    ).rejects.toThrow(/not found/i);
+    const { data: leaked } = await admin
+      .from("module_entries")
+      .select("id")
+      .eq("module_id", moduleAId)
+      .eq("position", 72);
+    expect(leaked).toHaveLength(0);
+
+    // Both successful assignments are audited.
+    const { data: audit } = await admin
+      .from("audit_log")
+      .select("after")
+      .eq("action", "square.assigned_by_admin")
+      .filter("after->>module_id", "eq", moduleAId);
+    expect(audit?.map((a) => (a.after as { position: number }).position).sort()).toEqual([70, 71]);
+
+    await setConfig(moduleAId, {}); // clear lock/password/price for later tests
   });
 
   it("releases only stale unpaid squares older than the cutoff", async () => {

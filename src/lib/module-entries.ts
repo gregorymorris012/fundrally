@@ -2,6 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { createServiceClient } from "@/lib/supabase/service";
 import { requireOrgAdmin } from "@/lib/require-org-admin";
 import { addOfflineGiftCore, voidOfflineGiftCore } from "@/lib/payments/offline-gift";
@@ -372,4 +373,134 @@ export async function releaseStaleSquares(formData: FormData) {
     `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,
   );
   revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+}
+
+// Organizer-side "assign a square": put a name on a specific square
+// directly (someone paid in person, phoned it in, joined late). Unlike a
+// guest's joinModuleCore this deliberately ignores the board lock and the
+// join password — those gate *guests*, not the organizer running the pool —
+// but is otherwise the same write: service role (module_entries has no
+// client INSERT policy), the same price snapshot, and the same unique index
+// guarding against a double-claim. Optionally marks the square paid in the
+// same step through the normal markSquarePaidCore path (a real offline-gift
+// transactions row), so the ledger rules are unchanged. The org filter on
+// the module lookup is what stops an admin of one org assigning squares in
+// another's pool: requireOrgAdmin only proves they administer *an* org.
+export async function assignSquareCore(input: {
+  orgId: string;
+  fundraiserId: string;
+  moduleId: string;
+  position: number;
+  displayName: string;
+  markPaid?: boolean;
+  method?: "cash" | "check" | "in_kind" | "other";
+  actor: string;
+}) {
+  if (!Number.isInteger(input.position) || input.position < 0 || input.position > 99) {
+    throw new Error("Pick a square between 1 and 100.");
+  }
+  const displayName = input.displayName.trim().slice(0, MAX_NAME_LENGTH);
+  if (!displayName) throw new Error("Enter a name for the square.");
+
+  const admin = createServiceClient();
+  const { data: module_ } = await admin
+    .from("modules")
+    .select("config, type")
+    .eq("id", input.moduleId)
+    .eq("org_id", input.orgId)
+    .maybeSingle();
+  if (!module_ || module_.type !== "squares") throw new Error("Pool not found.");
+  const config = ((module_ as { config: SquaresConfig | null }).config) ?? {};
+
+  const { data: entry, error } = await admin
+    .from("module_entries")
+    .insert({
+      org_id: input.orgId,
+      module_id: input.moduleId,
+      display_name: displayName,
+      position: input.position,
+      price_cents: config.pricePerSquareCents ?? null,
+    })
+    .select("id")
+    .single();
+  if (error) {
+    if (error.code === UNIQUE_VIOLATION) {
+      throw new Error(`Square ${input.position + 1} is already taken.`);
+    }
+    throw error;
+  }
+  const entryId = entry!.id as string;
+
+  await admin.from("audit_log").insert({
+    org_id: input.orgId,
+    actor: input.actor,
+    action: "square.assigned_by_admin",
+    after: {
+      module_id: input.moduleId,
+      entry_id: entryId,
+      position: input.position,
+      display_name: displayName,
+    },
+  });
+
+  // The square is assigned either way; a failed paid-mark is reported, not
+  // rolled back (the organizer can mark it paid from the panel).
+  let paidError: string | null = null;
+  if (input.markPaid) {
+    try {
+      await markSquarePaidCore({
+        orgId: input.orgId,
+        fundraiserId: input.fundraiserId,
+        moduleId: input.moduleId,
+        entryId,
+        method: input.method ?? "cash",
+        enteredBy: input.actor,
+      });
+    } catch (err) {
+      paidError = err instanceof Error ? err.message : "couldn't mark it paid";
+    }
+  }
+  return { entryId, paidError };
+}
+
+// Form wrapper. Errors bounce back with a message instead of throwing —
+// this runs from an inline panel where Next's generic error page would be
+// a bad outcome. redirect() throws, so it stays outside the try.
+export async function assignSquareAsAdmin(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+  const fundraiserId = String(formData.get("fundraiserId"));
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const position = Number(formData.get("position"));
+  const displayName = String(formData.get("displayName") ?? "");
+  const back = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`;
+
+  const userId = await requireOrgAdmin(orgId);
+
+  let failure: string | null = null;
+  try {
+    const { paidError } = await assignSquareCore({
+      orgId,
+      fundraiserId,
+      moduleId,
+      position,
+      displayName,
+      markPaid: formData.get("markPaid") === "on",
+      method: String(formData.get("method") ?? "cash") as "cash" | "check" | "in_kind" | "other",
+      actor: userId,
+    });
+    if (paidError) {
+      failure = `Square ${position + 1} was assigned to ${displayName.trim()}, but it couldn't be marked paid: ${paidError}`;
+    }
+  } catch (err) {
+    failure = err instanceof Error ? err.message : "Something went wrong.";
+  }
+
+  revalidatePath(back);
+  revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+  if (failure) {
+    redirect(`${back}?tab=grid&assignError=${encodeURIComponent(failure)}#board`);
+  }
+  redirect(`${back}?tab=grid&assigned=${position + 1}#board`);
 }
