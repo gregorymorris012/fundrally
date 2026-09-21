@@ -283,6 +283,16 @@ export async function updateSquaresBoard(formData: FormData) {
     `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,
   );
   revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+
+  // Redirect rather than re-render in place: the page's ESPN search lives
+  // in the URL (espnLeague/espnQuery), so staying put left the full list of
+  // candidate games on screen after one was picked. Rebuilding the URL
+  // drops those params, `boardSaved` triggers the confirmation banner, and
+  // the hash keeps the admin at the Customize board card instead of the
+  // top of a long page.
+  redirect(
+    `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}?boardSaved=1#customize-board`,
+  );
 }
 
 // Separate action from updateSquaresBoard since it has a distinct input

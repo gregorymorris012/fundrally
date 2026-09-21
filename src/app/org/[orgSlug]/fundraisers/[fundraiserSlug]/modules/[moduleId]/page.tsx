@@ -111,10 +111,10 @@ export default async function ModuleAdminPage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; fundraiserSlug: string; moduleId: string }>;
-  searchParams: Promise<{ espnLeague?: string; espnQuery?: string }>;
+  searchParams: Promise<{ espnLeague?: string; espnQuery?: string; boardSaved?: string }>;
 }) {
   const { orgSlug, fundraiserSlug, moduleId } = await params;
-  const { espnLeague, espnQuery } = await searchParams;
+  const { espnLeague, espnQuery, boardSaved } = await searchParams;
   const supabase = await createClient();
 
   const {
@@ -480,11 +480,22 @@ export default async function ModuleAdminPage({
               buried under every settings card. */}
           <div className="flex min-w-0 flex-col gap-6">
             {isAdmin && (
-              <Card>
+              <Card id="customize-board" className="scroll-mt-6">
                 <CardHeader>
                   <CardTitle>Customize board</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  {boardSaved && (
+                    <Alert variant="success">
+                      <AlertTitle>Board updated</AlertTitle>
+                      <AlertDescription>
+                        Now set up as {displayTitle}
+                        {squaresConfig.colLabel && squaresConfig.rowLabel
+                          ? ` — ${squaresConfig.colLabel} across the top, ${squaresConfig.rowLabel} down the side.`
+                          : "."}
+                      </AlertDescription>
+                    </Alert>
+                  )}
                   <div className="space-y-3">
                     <p className="text-sm text-muted-foreground">
                       Searches ESPN&apos;s public schedule to prefill team
