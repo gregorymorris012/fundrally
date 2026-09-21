@@ -16,7 +16,7 @@ import { drawSquaresCore } from "@/lib/draws";
 import type { SquaresConfig } from "@/lib/squares-config";
 
 // Covers the squares-module additions (payment tracking, join password,
-// lock, segmented draws, activity log) against a real local database.
+// lock, single number draw, activity log) against a real local database.
 //
 // Scope note: updateSquaresBoard/updateJoinPassword/toggleSquaresLock and
 // every "use server" wrapper action (markSquarePaid, voidSquarePayment,
@@ -278,23 +278,31 @@ describe("squares lifecycle", () => {
     await setConfig(moduleAId, { locked: false });
   });
 
-  it("draws each configured segment independently, once each", async () => {
-    const q1 = await drawSquaresCore({ orgId: orgAId, moduleId: moduleAId, segment: "q1", actor: userA.userId });
+  it("draws the numbers exactly once per pool — they stay fixed for the whole game", async () => {
+    const draw = await drawSquaresCore({ orgId: orgAId, moduleId: moduleAId, actor: userA.userId });
+    expect([...draw.result.rowDigits].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    expect([...draw.result.colDigits].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+    // A second draw is refused (pre-check) — periods never get their own numbers.
     await expect(
-      drawSquaresCore({ orgId: orgAId, moduleId: moduleAId, segment: "q1", actor: userA.userId }),
+      drawSquaresCore({ orgId: orgAId, moduleId: moduleAId, actor: userA.userId }),
     ).rejects.toThrow(/already been drawn/i);
 
-    const q2 = await drawSquaresCore({ orgId: orgAId, moduleId: moduleAId, segment: "q2", actor: userA.userId });
-    const final = await drawSquaresCore({ orgId: orgAId, moduleId: moduleAId, segment: "final", actor: userA.userId });
+    // ...and the DB-level guarantee holds independently of the pre-check.
+    const admin = serviceClient();
+    const { error: dupError } = await admin.from("draws").insert({
+      org_id: orgAId,
+      module_id: moduleAId,
+      segment: "final",
+      algorithm: "test",
+      inputs: {},
+      result: { rowDigits: [], colDigits: [] },
+      actor: userA.userId,
+    });
+    expect(dupError?.code).toBe("23505");
 
-    expect(q1.result.rowDigits).not.toEqual(q2.result.rowDigits);
-    expect(q1.result.colDigits).not.toEqual(final.result.colDigits);
-
-    const { data: allDraws } = await serviceClient()
-      .from("draws")
-      .select("segment")
-      .eq("module_id", moduleAId);
-    expect(new Set(allDraws?.map((d) => d.segment))).toEqual(new Set(["q1", "q2", "final"]));
+    const { data: allDraws } = await admin.from("draws").select("id").eq("module_id", moduleAId);
+    expect(allDraws).toHaveLength(1);
   });
 
   it("releases only stale unpaid squares older than the cutoff", async () => {

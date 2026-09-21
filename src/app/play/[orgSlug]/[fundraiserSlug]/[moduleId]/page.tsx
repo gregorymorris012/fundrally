@@ -3,11 +3,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { joinModule } from "@/lib/module-entries";
-import {
-  SEGMENTS_BY_STRUCTURE,
-  type SquaresConfig,
-  type DrawSegment,
-} from "@/lib/squares-config";
+import { PERIOD_SHORT_LABELS, type SquaresConfig } from "@/lib/squares-config";
+import { deriveWinners } from "@/lib/squares-rules";
+import { RulesAndPayouts, WinnersTable } from "@/components/squares/rules-and-payouts";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,14 +19,6 @@ const MODULE_TYPE_LABELS: Record<string, string> = {
   fifty_fifty: "50/50",
   item_raffle: "Item raffle",
   wheel: "Prize wheel",
-};
-
-const SEGMENT_LABELS: Record<DrawSegment, string> = {
-  q1: "1st quarter",
-  q2: "2nd quarter",
-  q3: "3rd quarter",
-  half: "Halftime",
-  final: "Final",
 };
 
 const GRID_SIZE = 10;
@@ -57,10 +47,10 @@ export default async function PlayModulePage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; fundraiserSlug: string; moduleId: string }>;
-  searchParams: Promise<{ claim?: string; pw?: string; segment?: string }>;
+  searchParams: Promise<{ claim?: string; pw?: string }>;
 }) {
   const { orgSlug, fundraiserSlug, moduleId } = await params;
-  const { claim, pw, segment: segmentParam } = await searchParams;
+  const { claim, pw } = await searchParams;
 
   // Anon-capable client — db/migrations/0012_module_entries_policies.sql /
   // 0014_draws_and_squares_positions.sql are what make this readable for a
@@ -92,8 +82,8 @@ export default async function PlayModulePage({
 
   const isSquares = module_.type === "squares";
   const squaresConfig = (module_.config as SquaresConfig | null) ?? {};
-  const rowLabel = squaresConfig.rowLabel || "Team A";
-  const colLabel = squaresConfig.colLabel || "Team B";
+  const colLabel = squaresConfig.colLabel || "Team A"; // across the top
+  const rowLabel = squaresConfig.rowLabel || "Team B"; // down the side
 
   // Low-stakes access gate, checked via a ?pw= query param (see
   // src/lib/modules.ts's updateJoinPassword for why: this page has no
@@ -113,33 +103,23 @@ export default async function PlayModulePage({
     .order("created_at", { ascending: false })
     .limit(200);
 
-  const payoutStructure = squaresConfig.payoutStructure ?? "final_only";
-  const configuredSegments = SEGMENTS_BY_STRUCTURE[payoutStructure];
-
+  // One draw per pool: the digits are fixed for the whole game.
   const { data: draws } = isSquares
     ? await supabase
         .from("draws")
-        .select("segment, result")
+        .select("result")
         .eq("module_id", module_.id)
+        .order("created_at", { ascending: true })
     : { data: [] };
-  const drawBySegment = new Map(
-    (draws ?? []).map((d) => [
-      d.segment as DrawSegment,
-      d.result as { rowDigits: number[]; colDigits: number[] },
-    ]),
-  );
-  const drawnSegments = configuredSegments.filter((s) => drawBySegment.has(s));
-  const requestedSegment = segmentParam as DrawSegment | undefined;
-  const activeSegment =
-    requestedSegment && drawnSegments.includes(requestedSegment)
-      ? requestedSegment
-      : drawnSegments[drawnSegments.length - 1];
-  const drawResult = activeSegment ? drawBySegment.get(activeSegment) : undefined;
+  const drawResult = draws?.[0]?.result as
+    | { rowDigits: number[]; colDigits: number[] }
+    | undefined;
 
   const claimedByPosition = new Map<number, string>();
   for (const e of entries ?? []) {
     if (e.position != null) claimedByPosition.set(e.position, e.display_name);
   }
+  const winners = deriveWinners(squaresConfig, drawResult, claimedByPosition);
   const claimPosition =
     claim != null && /^\d+$/.test(claim) ? Number(claim) : null;
   const claimIsOpen =
@@ -239,35 +219,6 @@ export default async function PlayModulePage({
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {configuredSegments.length > 1 && (
-                <div className="mb-3 flex flex-wrap gap-2">
-                  {configuredSegments.map((segment) => {
-                    const isDrawn = drawnSegments.includes(segment);
-                    const isActive = segment === activeSegment;
-                    return isDrawn ? (
-                      <Link
-                        key={segment}
-                        href={`/play/${orgSlug}/${fundraiserSlug}/${module_.id}?segment=${segment}${pwQuery ? `&${pwQuery}` : ""}`}
-                        className={cn(
-                          buttonVariants({ variant: isActive ? "default" : "outline", size: "sm" }),
-                        )}
-                      >
-                        {SEGMENT_LABELS[segment]}
-                      </Link>
-                    ) : (
-                      <span
-                        key={segment}
-                        className={cn(
-                          buttonVariants({ variant: "outline", size: "sm" }),
-                          "pointer-events-none opacity-50",
-                        )}
-                      >
-                        {SEGMENT_LABELS[segment]}
-                      </span>
-                    );
-                  })}
-                </div>
-              )}
               {!drawResult && (
                 <p className="mb-3 text-xs text-muted-foreground">
                   Numbers haven&apos;t been drawn yet — the organizer draws
@@ -286,6 +237,9 @@ export default async function PlayModulePage({
                   .map((e) => ({ position: e.position as number, name: e.display_name }))}
                 showNumbers={squaresConfig.showSquareNumbers !== false}
                 selectedPosition={claimIsOpen ? claimPosition : null}
+                winners={winners
+                  .filter((w) => w.position != null)
+                  .map((w) => ({ position: w.position as number, label: PERIOD_SHORT_LABELS[w.period] }))}
                 claimHrefBase={
                   squaresConfig.locked
                     ? null
@@ -295,6 +249,19 @@ export default async function PlayModulePage({
               />
             </CardContent>
           </Card>
+
+          {winners.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Winners</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <WinnersTable winners={winners} colLabel={colLabel} rowLabel={rowLabel} />
+              </CardContent>
+            </Card>
+          )}
+
+          <RulesAndPayouts config={squaresConfig} colLabel={colLabel} rowLabel={rowLabel} />
         </>
       ) : (
         <>

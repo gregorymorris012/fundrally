@@ -5,6 +5,8 @@ import { createProduct } from "@/lib/products";
 import {
   updateModuleStatus,
   updateSquaresBoard,
+  updatePayoutRules,
+  saveSquaresScore,
   updateJoinPassword,
   toggleSquaresLock,
   deleteModule,
@@ -12,10 +14,14 @@ import {
 import { ConfirmSubmitButton } from "@/components/confirm-submit-button";
 import { drawSquares } from "@/lib/draws";
 import {
-  SEGMENTS_BY_STRUCTURE,
+  PAYOUT_STRUCTURE_OPTIONS,
+  PERIOD_LABELS,
+  PERIOD_SHORT_LABELS,
   type SquaresConfig,
-  type DrawSegment,
 } from "@/lib/squares-config";
+import { deriveWinners, resolveRules } from "@/lib/squares-rules";
+import { PayoutRulesForm } from "@/components/squares/payout-rules-form";
+import { WinnersTable } from "@/components/squares/rules-and-payouts";
 import {
   markSquarePaid,
   voidSquarePayment,
@@ -75,20 +81,6 @@ const NEXT_ACTIONS: Record<string, { status: string; label: string }[]> = {
   closed: [],
 };
 
-const SEGMENT_LABELS: Record<DrawSegment, string> = {
-  q1: "1st quarter",
-  q2: "2nd quarter",
-  q3: "3rd quarter",
-  half: "Halftime",
-  final: "Final",
-};
-
-const PAYOUT_STRUCTURE_LABELS = {
-  final_only: "Final score only",
-  half_final: "Halftime + Final",
-  quarters: "Every quarter + Final",
-} as const;
-
 function centsToDollars(cents: number) {
   return (cents / 100).toLocaleString("en-US", {
     style: "currency",
@@ -111,10 +103,19 @@ export default async function ModuleAdminPage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; fundraiserSlug: string; moduleId: string }>;
-  searchParams: Promise<{ espnLeague?: string; espnQuery?: string; boardSaved?: string }>;
+  searchParams: Promise<{
+    espnLeague?: string;
+    espnQuery?: string;
+    boardSaved?: string;
+    payoutsSaved?: string;
+    payoutError?: string;
+    scoreSaved?: string;
+    scoreError?: string;
+  }>;
 }) {
   const { orgSlug, fundraiserSlug, moduleId } = await params;
-  const { espnLeague, espnQuery, boardSaved } = await searchParams;
+  const { espnLeague, espnQuery, boardSaved, payoutsSaved, payoutError, scoreSaved, scoreError } =
+    await searchParams;
   const supabase = await createClient();
 
   const {
@@ -157,8 +158,7 @@ export default async function ModuleAdminPage({
   const isChanceModule = CHANCE_MODULE_TYPES.includes(module_.type);
   const isSquares = module_.type === "squares";
   const squaresConfig = (module_.config as SquaresConfig | null) ?? {};
-  const payoutStructure = squaresConfig.payoutStructure ?? "final_only";
-  const segments = SEGMENTS_BY_STRUCTURE[payoutStructure];
+  const rules = resolveRules(squaresConfig);
 
   const { data: entries } = isSquares
     ? await supabase
@@ -175,23 +175,15 @@ export default async function ModuleAdminPage({
         .eq("module_id", module_.id)
     : { count: 0 };
 
+  // One draw per pool: the digits are fixed for the whole game.
   const { data: draws } = isSquares
     ? await supabase
         .from("draws")
-        .select("segment, result, created_at")
+        .select("result, created_at")
         .eq("module_id", module_.id)
+        .order("created_at", { ascending: true })
     : { data: [] };
-  const drawBySegment = new Map(
-    (draws ?? []).map((d) => [
-      d.segment as DrawSegment,
-      d as { segment: DrawSegment; result: { rowDigits: number[]; colDigits: number[] }; created_at: string },
-    ]),
-  );
-
-  const latestDraw = [...segments]
-    .reverse()
-    .map((segment) => drawBySegment.get(segment))
-    .find(Boolean);
+  const draw = draws?.[0]?.result as { rowDigits: number[]; colDigits: number[] } | undefined;
 
   const { data: activity } = isSquares
     ? await supabase
@@ -244,6 +236,8 @@ export default async function ModuleAdminPage({
   const hasPaymentActivity = (paymentCount ?? 0) > 0;
 
   const claimedEntries = (entries ?? []).filter((e) => e.position != null);
+  const holders = new Map(claimedEntries.map((e) => [e.position as number, e.display_name]));
+  const winners = deriveWinners(squaresConfig, draw, holders);
   const paidCount = claimedEntries.filter((e) => e.transaction_id).length;
   const unpaidCount = claimedEntries.length - paidCount;
   const collectedCents = claimedEntries
@@ -602,7 +596,6 @@ export default async function ModuleAdminPage({
                                           : ""
                                       }
                                     />
-                                    <input type="hidden" name="payoutStructure" value={payoutStructure} />
                                     <Button type="submit" variant="outline" size="sm">
                                       Use this game
                                     </Button>
@@ -714,22 +707,6 @@ export default async function ModuleAdminPage({
                         placeholder="Leave blank for no price"
                       />
                     </div>
-                    <fieldset className="space-y-1.5">
-                      <Label>Payout structure</Label>
-                      {(Object.keys(PAYOUT_STRUCTURE_LABELS) as (keyof typeof PAYOUT_STRUCTURE_LABELS)[]).map(
-                        (structure) => (
-                          <label key={structure} className="flex items-center gap-2 text-sm">
-                            <input
-                              type="radio"
-                              name="payoutStructure"
-                              value={structure}
-                              defaultChecked={payoutStructure === structure}
-                            />
-                            {PAYOUT_STRUCTURE_LABELS[structure]}
-                          </label>
-                        ),
-                      )}
-                    </fieldset>
                     <div className="flex items-start gap-2">
                       {/* Marker so the ESPN "Use this game" form, which posts
                           to the same action without this checkbox, doesn't
@@ -786,8 +763,11 @@ export default async function ModuleAdminPage({
                     rowLabel={squaresConfig.rowLabel || "Side team"}
                     colColor={squaresConfig.colColor}
                     rowColor={squaresConfig.rowColor}
-                    colDigits={latestDraw?.result.colDigits}
-                    rowDigits={latestDraw?.result.rowDigits}
+                    colDigits={draw?.colDigits}
+                    rowDigits={draw?.rowDigits}
+                    winners={winners
+                      .filter((w) => w.position != null)
+                      .map((w) => ({ position: w.position as number, label: PERIOD_SHORT_LABELS[w.period] }))}
                     entries={claimedEntries.map((e) => ({
                       position: e.position as number,
                       name: e.display_name,
@@ -810,51 +790,169 @@ export default async function ModuleAdminPage({
               </CardContent>
             </Card>
 
+            {isAdmin && (
+              <Card id="payouts" className="scroll-mt-6">
+                <CardHeader>
+                  <CardTitle>Payouts</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {payoutsSaved && (
+                    <Alert variant="success">
+                      <AlertTitle>Payout rules saved</AlertTitle>
+                    </Alert>
+                  )}
+                  {payoutError && (
+                    <Alert variant="destructive">
+                      <AlertTitle>Payout rules not saved</AlertTitle>
+                      <AlertDescription>{payoutError}</AlertDescription>
+                    </Alert>
+                  )}
+                  <PayoutRulesForm
+                    key={JSON.stringify([rules, squaresConfig.pricePerSquareCents])}
+                    action={updatePayoutRules}
+                    orgId={org.id}
+                    moduleId={module_.id}
+                    orgSlug={orgSlug}
+                    fundraiserSlug={fundraiserSlug}
+                    pricePerSquareCents={squaresConfig.pricePerSquareCents ?? null}
+                    initial={{
+                      structure: rules.structure,
+                      charityBps: rules.charityBps,
+                      splitBps: rules.splitBps,
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            )}
+
             <Card>
               <CardHeader>
                 <CardTitle>Draw numbers</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Assigns row/column digits 0-9 once per segment,
-                  server-side (crypto.randomInt) — can&apos;t be undone or
-                  redrawn.
+                  Assigns the row and column digits 0–9 once, server-side
+                  (crypto.randomInt). The same numbers are used for the whole
+                  game — every period pays the square they point to. Can&apos;t be
+                  undone or redrawn.
                 </p>
-                {segments.map((segment) => {
-                  const draw = drawBySegment.get(segment);
-                  return (
-                    <div key={segment} className="border-t border-border pt-3 first:border-t-0 first:pt-0">
-                      <p className="mb-1 text-sm font-medium text-foreground">
-                        {SEGMENT_LABELS[segment]}
-                      </p>
-                      {draw ? (
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="text-muted-foreground">Row digits</p>
-                            <p className="font-mono">{draw.result.rowDigits.join(", ")}</p>
-                          </div>
-                          <div>
-                            <p className="text-muted-foreground">Column digits</p>
-                            <p className="font-mono">{draw.result.colDigits.join(", ")}</p>
-                          </div>
-                        </div>
-                      ) : isAdmin ? (
-                        <form action={drawSquares}>
-                          <input type="hidden" name="orgId" value={org.id} />
-                          <input type="hidden" name="moduleId" value={module_.id} />
-                          <input type="hidden" name="orgSlug" value={orgSlug} />
-                          <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
-                          <input type="hidden" name="segment" value={segment} />
-                          <Button type="submit" variant="outline" size="sm">
-                            Draw {SEGMENT_LABELS[segment].toLowerCase()} now
-                          </Button>
-                        </form>
-                      ) : (
-                        <p className="text-sm text-muted-foreground">Not drawn yet.</p>
-                      )}
+                {draw ? (
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-muted-foreground">Row digits (side)</p>
+                      <p className="font-mono">{draw.rowDigits.join(", ")}</p>
                     </div>
-                  );
-                })}
+                    <div>
+                      <p className="text-muted-foreground">Column digits (top)</p>
+                      <p className="font-mono">{draw.colDigits.join(", ")}</p>
+                    </div>
+                  </div>
+                ) : isAdmin ? (
+                  <form action={drawSquares}>
+                    <input type="hidden" name="orgId" value={org.id} />
+                    <input type="hidden" name="moduleId" value={module_.id} />
+                    <input type="hidden" name="orgSlug" value={orgSlug} />
+                    <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                    <Button type="submit" variant="outline" size="sm">
+                      Draw numbers now
+                    </Button>
+                  </form>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Not drawn yet.</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card id="scores" className="scroll-mt-6">
+              <CardHeader>
+                <CardTitle>Scores &amp; winners</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {scoreSaved && (
+                  <Alert variant="success">
+                    <AlertTitle>Score saved</AlertTitle>
+                  </Alert>
+                )}
+                {scoreError && (
+                  <Alert variant="destructive">
+                    <AlertTitle>Score not saved</AlertTitle>
+                    <AlertDescription>{scoreError}</AlertDescription>
+                  </Alert>
+                )}
+                {isAdmin &&
+                  (draw ? (
+                    <div className="space-y-3">
+                      <p className="text-sm text-muted-foreground">
+                        Enter the score at the end of each period. The winning
+                        square is where {squaresConfig.colLabel || "the top team"}&apos;s
+                        last digit (column) meets{" "}
+                        {squaresConfig.rowLabel || "the side team"}&apos;s (row).
+                        Saving a period again corrects it.
+                      </p>
+                      {rules.periods.map((period) => {
+                        const saved = squaresConfig.scores?.[period];
+                        return (
+                          <form
+                            key={`${period}:${saved?.col ?? ""}:${saved?.row ?? ""}`}
+                            action={saveSquaresScore}
+                            className="flex flex-wrap items-end gap-3"
+                          >
+                            <input type="hidden" name="orgId" value={org.id} />
+                            <input type="hidden" name="moduleId" value={module_.id} />
+                            <input type="hidden" name="orgSlug" value={orgSlug} />
+                            <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                            <input type="hidden" name="period" value={period} />
+                            <span className="w-full text-sm font-medium text-foreground sm:w-52">
+                              {PERIOD_LABELS[period]}
+                            </span>
+                            <div className="space-y-1">
+                              <Label htmlFor={`col_${period}`} className="text-xs">
+                                {squaresConfig.colLabel || "Top team"}
+                              </Label>
+                              <Input
+                                id={`col_${period}`}
+                                name="colScore"
+                                type="number"
+                                min="0"
+                                max="999"
+                                required
+                                defaultValue={saved?.col ?? ""}
+                                className="w-24"
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label htmlFor={`row_${period}`} className="text-xs">
+                                {squaresConfig.rowLabel || "Side team"}
+                              </Label>
+                              <Input
+                                id={`row_${period}`}
+                                name="rowScore"
+                                type="number"
+                                min="0"
+                                max="999"
+                                required
+                                defaultValue={saved?.row ?? ""}
+                                className="w-24"
+                              />
+                            </div>
+                            <Button type="submit" variant="outline" size="sm">
+                              {saved ? "Update" : "Save"}
+                            </Button>
+                          </form>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      Draw the numbers first — scores can be entered once the
+                      board&apos;s digits are set.
+                    </p>
+                  ))}
+                <WinnersTable
+                  winners={winners}
+                  colLabel={squaresConfig.colLabel || "Top team"}
+                  rowLabel={squaresConfig.rowLabel || "Side team"}
+                />
               </CardContent>
             </Card>
 
@@ -1074,7 +1172,9 @@ export default async function ModuleAdminPage({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Payout structure</span>
-                  <span>{PAYOUT_STRUCTURE_LABELS[payoutStructure]}</span>
+                  <span>
+                    {PAYOUT_STRUCTURE_OPTIONS.find((o) => o.value === rules.structure)?.label}
+                  </span>
                 </div>
                 <div>
                   <div className="mb-1 flex items-center justify-between">
@@ -1090,9 +1190,7 @@ export default async function ModuleAdminPage({
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Numbers drawn</span>
-                  <span>
-                    {drawBySegment.size} of {segments.length}
-                  </span>
+                  <span>{draw ? "Yes" : "No"}</span>
                 </div>
               </CardContent>
             </Card>

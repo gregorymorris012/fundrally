@@ -29,6 +29,7 @@ export function SquaresBoard({
   entries,
   showNumbers = true,
   selectedPosition = null,
+  winners = [],
   claimHrefBase = null,
   claimHrefSuffix = "",
 }: {
@@ -42,6 +43,9 @@ export function SquaresBoard({
   entries: BoardEntry[];
   showNumbers?: boolean;
   selectedPosition?: number | null;
+  // Squares that won a period, e.g. { position: 47, label: "Half" }. A
+  // square can win more than one period.
+  winners?: { position: number; label: string }[];
   // Public board: open squares link to `${claimHrefBase}${position}${suffix}`.
   // Null means open squares aren't clickable (admin view, or pool locked).
   // A base string rather than a function because this component's props
@@ -51,6 +55,10 @@ export function SquaresBoard({
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const byPosition = new Map(entries.map((e) => [e.position, e]));
+  const winsByPosition = new Map<number, string[]>();
+  for (const w of winners) {
+    winsByPosition.set(w.position, [...(winsByPosition.get(w.position) ?? []), w.label]);
+  }
   const hoverRow = hover == null ? null : Math.floor(hover / GRID);
   const hoverCol = hover == null ? null : hover % GRID;
 
@@ -135,6 +143,7 @@ export function SquaresBoard({
           const inCrosshair = hover != null && !isHovered && (hoverRow === row || hoverCol === col);
           const isSelected = selectedPosition === position;
           const label = position + 1;
+          const wins = winsByPosition.get(position);
           const href =
             !entry && claimHrefBase != null
               ? `${claimHrefBase}${position}${claimHrefSuffix}`
@@ -146,6 +155,8 @@ export function SquaresBoard({
             entry && !entry.status && "bg-slate-100 dark:bg-slate-800",
             entry?.status === "paid" && "bg-success/20",
             entry?.status === "unpaid" && "bg-warning/20",
+            // Winners: a gold fill, distinct from the deep-blue selection outline.
+            wins && "bg-amber-200 dark:bg-amber-500/30",
             inCrosshair && "bg-selection/10",
             // The selection outline: deep blue, drawn inside the cell so
             // neighbouring squares' borders can't cover it.
@@ -166,7 +177,12 @@ export function SquaresBoard({
                   {entry.name.split(" ")[0]}
                 </span>
               )}
-              {entry && (
+              {wins && (
+                <span className="pointer-events-none absolute right-0.5 bottom-0.5 text-[8px] leading-none font-bold text-amber-900 dark:text-amber-200">
+                  ★ {wins.join(" · ")}
+                </span>
+              )}
+              {(entry || wins) && (
                 // Sits outside any overflow-hidden ancestor on purpose: the
                 // earlier boards clipped this popover, so hover never
                 // showed the name.
@@ -176,8 +192,10 @@ export function SquaresBoard({
                     row === 0 ? "top-full mt-1" : "bottom-full mb-1",
                   )}
                 >
-                  #{label} · {entry.name}
-                  {entry.status && ` · ${entry.status === "paid" ? "Paid" : "Unpaid"}`}
+                  #{label}
+                  {entry && ` · ${entry.name}`}
+                  {entry?.status && ` · ${entry.status === "paid" ? "Paid" : "Unpaid"}`}
+                  {wins && ` · Winner: ${wins.join(", ")}`}
                 </span>
               )}
             </>

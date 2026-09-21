@@ -6,7 +6,18 @@ import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
 import { createServiceClient } from "@/lib/supabase/service";
 import { requireOrgAdmin } from "@/lib/require-org-admin";
-import type { SquaresConfig } from "@/lib/squares-config";
+import {
+  PERIODS_BY_STRUCTURE,
+  type PayoutStructure,
+  type SquaresConfig,
+  type SquaresPeriod,
+} from "@/lib/squares-config";
+import {
+  computePayouts,
+  resolveRules,
+  validateSplit,
+  winningPosition,
+} from "@/lib/squares-rules";
 
 // Same reasoning as createFundraiser(): plain RLS INSERT policy
 // ("org admins can create modules" in db/migrations/0007_phase2_policies.sql),
@@ -257,7 +268,6 @@ export async function updateSquaresBoard(formData: FormData) {
   const rowColorRaw = String(formData.get("rowColor") ?? "").trim();
   const colColorRaw = String(formData.get("colColor") ?? "").trim();
   const priceRaw = String(formData.get("pricePerSquare") ?? "").trim();
-  const payoutStructureRaw = String(formData.get("payoutStructure") ?? "final_only");
 
   if (rowColorRaw && !HEX_COLOR_RE.test(rowColorRaw)) {
     throw new Error("rowColor must be a #rrggbb hex value");
@@ -273,9 +283,6 @@ export async function updateSquaresBoard(formData: FormData) {
     }
     pricePerSquareCents = cents;
   }
-  if (!PAYOUT_STRUCTURES.includes(payoutStructureRaw as (typeof PAYOUT_STRUCTURES)[number])) {
-    throw new Error(`invalid payout structure: ${payoutStructureRaw}`);
-  }
 
   const current = await readSquaresConfig(moduleId);
   const next: SquaresConfig = {
@@ -285,7 +292,6 @@ export async function updateSquaresBoard(formData: FormData) {
     rowColor: rowColorRaw || undefined,
     colColor: colColorRaw || undefined,
     pricePerSquareCents,
-    payoutStructure: payoutStructureRaw as SquaresConfig["payoutStructure"],
     // Only the full board-settings form carries this checkbox; the ESPN
     // "Use this game" form doesn't, so absent means "leave it alone".
     showSquareNumbers:
@@ -387,4 +393,136 @@ export async function toggleSquaresLock(formData: FormData) {
     `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`,
   );
   revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+}
+
+// Payout rules: structure (final only / halftime + final / every quarter +
+// final), the fundraiser's share of the pot, and how the rest is split
+// across the periods. Validated here, not just in the form's live total —
+// the form is a convenience, this is the check. A rejected edit bounces
+// back with the reason in the URL instead of throwing (which would show
+// Next's generic error page). Writes an audit row since these numbers
+// decide what winners are owed.
+export async function updatePayoutRules(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const back = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`;
+  const fail = (message: string): never =>
+    redirect(`${back}?payoutError=${encodeURIComponent(message)}#payouts`);
+
+  const userId = await requireOrgAdmin(orgId);
+
+  const structure = String(formData.get("payoutStructure")) as PayoutStructure;
+  if (!PAYOUT_STRUCTURES.includes(structure)) fail("Choose a payout structure.");
+
+  const charityPercent = Number(formData.get("charityPercent"));
+  if (!Number.isFinite(charityPercent) || charityPercent < 0 || charityPercent > 100) {
+    fail("The fundraiser's share must be between 0% and 100%.");
+  }
+  const charityBps = Math.round(charityPercent * 100);
+
+  const splitBps: Partial<Record<SquaresPeriod, number>> = {};
+  for (const period of PERIODS_BY_STRUCTURE[structure]) {
+    const percent = Number(formData.get(`pct_${period}`));
+    if (!Number.isFinite(percent)) fail("Every period needs a percentage.");
+    splitBps[period] = Math.round(percent * 100);
+  }
+  const splitError = validateSplit(structure, splitBps);
+  if (splitError) fail(splitError);
+
+  const current = await readSquaresConfig(moduleId);
+  const next: SquaresConfig = { ...current, payoutStructure: structure, charityBps, splitBps };
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("modules").update({ config: next }).eq("id", moduleId);
+  if (error) throw error;
+
+  await createServiceClient().from("audit_log").insert({
+    org_id: orgId,
+    actor: userId,
+    action: "squares.payout_rules_updated",
+    after: { module_id: moduleId, structure, charity_bps: charityBps, split_bps: splitBps },
+  });
+
+  revalidatePath(back);
+  revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+  redirect(`${back}?payoutsSaved=1#payouts`);
+}
+
+// Manual scoring: the organizer enters the score at the end of a period
+// (top team = column, side team = row) and the winner is derived from the
+// drawn numbers. Re-entering a period corrects it — each save is audited
+// with the resulting winner and prize so the history is reconstructible.
+// Prize amounts are bookkeeping only; the organizer settles payouts
+// offline (FundRally never holds or moves prize money).
+export async function saveSquaresScore(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const period = String(formData.get("period")) as SquaresPeriod;
+  const back = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`;
+  const fail = (message: string): never =>
+    redirect(`${back}?scoreError=${encodeURIComponent(message)}#scores`);
+
+  const userId = await requireOrgAdmin(orgId);
+
+  const current = await readSquaresConfig(moduleId);
+  const rules = resolveRules(current);
+  if (!rules.periods.includes(period)) fail("That period isn't part of this pool's payout structure.");
+
+  const col = Number(formData.get("colScore"));
+  const row = Number(formData.get("rowScore"));
+  const valid = (n: number) => Number.isInteger(n) && n >= 0 && n <= 999;
+  if (!valid(col) || !valid(row)) fail("Enter each score as a whole number, 0 or more.");
+
+  const admin = createServiceClient();
+  const { data: draw } = await admin
+    .from("draws")
+    .select("result")
+    .eq("module_id", moduleId)
+    .maybeSingle();
+  if (!draw) fail("Draw the numbers before entering scores.");
+
+  const position = winningPosition(
+    draw!.result as { rowDigits: number[]; colDigits: number[] },
+    { col, row },
+  );
+  const { data: holder } =
+    position == null
+      ? { data: null }
+      : await admin
+          .from("module_entries")
+          .select("display_name")
+          .eq("module_id", moduleId)
+          .eq("position", position)
+          .maybeSingle();
+
+  const next: SquaresConfig = {
+    ...current,
+    scores: { ...current.scores, [period]: { col, row } },
+  };
+  const supabase = await createClient();
+  const { error } = await supabase.from("modules").update({ config: next }).eq("id", moduleId);
+  if (error) throw error;
+
+  await admin.from("audit_log").insert({
+    org_id: orgId,
+    actor: userId,
+    action: "square.score_entered",
+    after: {
+      module_id: moduleId,
+      period,
+      col_score: col,
+      row_score: row,
+      winning_position: position,
+      winner_name: holder?.display_name ?? null,
+      prize_cents: computePayouts(next)?.periods.find((p) => p.period === period)?.cents ?? null,
+    },
+  });
+
+  revalidatePath(back);
+  revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+  redirect(`${back}?scoreSaved=1#scores`);
 }

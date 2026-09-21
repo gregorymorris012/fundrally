@@ -274,6 +274,31 @@ fundraiser under one connected account — there's no clean way to
 attribute one payout to a single fundraiser without a further API call
 (`balanceTransactions.list({ payout: po_id })`) this doesn't make yet.
 
+### Squares pools (rules and payouts)
+
+Squares state lives in `modules.config` (typed in `src/lib/squares-config.ts`,
+pure rules/payout math in `src/lib/squares-rules.ts` with unit tests in
+`tests/squares-rules.test.ts` that need no database). **The row/column
+numbers are drawn once per pool and never change** — each period (Q1,
+halftime, Q3, final) pays the square those fixed numbers point to at that
+period's score. An earlier version redrew per period; that was wrong. The
+`draws.segment` column is now vestigial (always `'final'`); the
+`(module_id, segment)` unique index is what makes "one draw per module" a
+DB-level guarantee. Payout structure is final only / halftime + final /
+every quarter + final. By default 50% of the pot (100 squares × price) goes
+to the fundraiser and the other 50% — the winners' pool — is split across
+the periods by `splitBps` (quarters default 12.5 / 25 / 12.5 / 50%; must
+total exactly 100%, validated server-side in `updatePayoutRules`). Scores are
+entered manually by an org admin (`saveSquaresScore`, audited); winners and
+prize amounts are derived, never stored. The away team is across the top
+(`colLabel`) and the home team down the side (`rowLabel`); the top team's last
+score digit picks the column and the side team's picks the row. Prize amounts
+are display/bookkeeping only — the organizer settles payouts offline, and
+chance modules stay demo-mode until the Phase 4 compliance work.
+Positions are 0-99 internally and shown as 1-100. Focus rings and selected
+outlines use the `--ring` / `--selection` deep blue in `globals.css`, not the
+brand orange.
+
 ### RLS testing
 
 `tests/rls/cross-tenant.test.ts` (org/membership tables),
