@@ -86,8 +86,8 @@
   --input: oklch(0.74 0.035 262);
   /* The outline drawn around every Card / section box. Deep blue (same hue
      as --selection) so sections are clearly separated site-wide. To soften
-     it, add an alpha, e.g. oklch(0.379 0.146 265.5 / 0.6). */
-  --card-outline: oklch(0.379 0.146 265.5);
+     it further lower the alpha; 1 is solid deep blue. */
+  --card-outline: oklch(0.379 0.146 265.5 / 0.6);
   /* Focus rings and "selected" outlines: a deep blue, deliberately not the
      brand orange (--primary) and not a light blue, so a selected card,
      square, or focused field stands out from the surrounding lines. */
