@@ -169,7 +169,7 @@ export async function updateModuleStatus(formData: FormData) {
 // transactions row can't reach 'closed'-and-deletable in the first place
 // unless that transaction is voided, and even then the transaction row
 // itself still exists and blocks the policy).
-export const MODULE_DELETE_BLOCKED_MESSAGE =
+const MODULE_DELETE_BLOCKED_MESSAGE =
   "Can't delete a module unless it's closed with no payment activity.";
 
 export async function deleteModuleCore(input: { moduleId: string }) {
