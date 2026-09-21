@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SquaresBoard } from "@/components/squares/squares-board";
 import { cn } from "@/lib/utils";
 
 const MODULE_TYPE_LABELS: Record<string, string> = {
@@ -196,7 +197,7 @@ export default async function PlayModulePage({
           {claimIsOpen && (
             <Card>
               <CardHeader>
-                <CardTitle>Claiming square #{claimPosition}</CardTitle>
+                <CardTitle>Claiming square #{(claimPosition ?? 0) + 1}</CardTitle>
               </CardHeader>
               <CardContent>
                 <form action={joinModule} className="space-y-3">
@@ -211,7 +212,7 @@ export default async function PlayModulePage({
                     <Input id="displayName" name="displayName" required autoFocus />
                   </div>
                   <Button type="submit" className="w-full">
-                    Claim square #{claimPosition}
+                    Claim square #{(claimPosition ?? 0) + 1}
                     {squaresConfig.pricePerSquareCents
                       ? ` (${centsToDollars(squaresConfig.pricePerSquareCents)})`
                       : " (demo)"}
@@ -273,113 +274,25 @@ export default async function PlayModulePage({
                   them once the board fills up.
                 </p>
               )}
-              <div className="overflow-x-auto">
-                <div
-                  className="grid w-fit"
-                  style={{
-                    gridTemplateColumns: `1.5rem 1.5rem repeat(${GRID_SIZE}, 2.25rem)`,
-                    gridTemplateRows: `1.75rem 1.5rem repeat(${GRID_SIZE}, 2.25rem)`,
-                  }}
-                >
-                  {/* corner spacer */}
-                  <div style={{ gridRow: "1 / 3", gridColumn: "1 / 3" }} />
-
-                  {/* column team bar (top) */}
-                  <div
-                    style={{
-                      gridRow: 1,
-                      gridColumn: `3 / span ${GRID_SIZE}`,
-                      backgroundColor: squaresConfig.colColor || undefined,
-                    }}
-                    className={cn(
-                      "flex items-center justify-center overflow-hidden px-1 text-[10px] font-bold tracking-wide text-background uppercase",
-                      !squaresConfig.colColor && "bg-foreground",
-                    )}
-                  >
-                    {colLabel}
-                  </div>
-
-                  {/* row team bar (side) */}
-                  <div
-                    style={{
-                      gridRow: `3 / span ${GRID_SIZE}`,
-                      gridColumn: 1,
-                      writingMode: "vertical-rl",
-                      backgroundColor: squaresConfig.rowColor || undefined,
-                    }}
-                    className={cn(
-                      "flex rotate-180 items-center justify-center overflow-hidden px-0.5 text-[10px] font-bold tracking-wide text-background uppercase",
-                      !squaresConfig.rowColor && "bg-muted-foreground",
-                    )}
-                  >
-                    {rowLabel}
-                  </div>
-
-                  {/* column digit headers */}
-                  {Array.from({ length: GRID_SIZE }, (_, col) => (
-                    <div
-                      key={`col-${col}`}
-                      style={{ gridRow: 2, gridColumn: col + 3 }}
-                      className="flex items-center justify-center text-xs font-mono text-muted-foreground"
-                    >
-                      {drawResult ? drawResult.colDigits[col] : ""}
-                    </div>
-                  ))}
-
-                  {/* row digit headers */}
-                  {Array.from({ length: GRID_SIZE }, (_, row) => (
-                    <div
-                      key={`row-${row}`}
-                      style={{ gridRow: row + 3, gridColumn: 2 }}
-                      className="flex items-center justify-center text-xs font-mono text-muted-foreground"
-                    >
-                      {drawResult ? drawResult.rowDigits[row] : ""}
-                    </div>
-                  ))}
-
-                  {/* squares */}
-                  {Array.from({ length: GRID_SIZE }, (_, row) =>
-                    Array.from({ length: GRID_SIZE }, (_, col) => {
-                      const position = row * GRID_SIZE + col;
-                      const claimedName = claimedByPosition.get(position);
-                      if (claimedName) {
-                        return (
-                          <div
-                            key={position}
-                            style={{ gridRow: row + 3, gridColumn: col + 3 }}
-                            className="group relative flex items-center justify-center overflow-hidden border border-border bg-primary/10 text-[9px] font-medium text-primary"
-                          >
-                            {claimedName.slice(0, 3)}
-                            <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background group-hover:block">
-                              {claimedName}
-                            </span>
-                          </div>
-                        );
-                      }
-                      if (squaresConfig.locked) {
-                        return (
-                          <div
-                            key={position}
-                            style={{ gridRow: row + 3, gridColumn: col + 3 }}
-                            className="flex items-center justify-center border border-border bg-muted/50"
-                          />
-                        );
-                      }
-                      return (
-                        <Link
-                          key={position}
-                          href={`/play/${orgSlug}/${fundraiserSlug}/${module_.id}?claim=${position}${pwQuery ? `&${pwQuery}` : ""}`}
-                          style={{ gridRow: row + 3, gridColumn: col + 3 }}
-                          className={cn(
-                            "flex items-center justify-center border border-border hover:bg-muted",
-                            claimPosition === position && "bg-muted ring-1 ring-inset ring-primary",
-                          )}
-                        />
-                      );
-                    }),
-                  )}
-                </div>
-              </div>
+              <SquaresBoard
+                colLabel={colLabel}
+                rowLabel={rowLabel}
+                colColor={squaresConfig.colColor}
+                rowColor={squaresConfig.rowColor}
+                colDigits={drawResult?.colDigits}
+                rowDigits={drawResult?.rowDigits}
+                entries={(entries ?? [])
+                  .filter((e) => e.position != null)
+                  .map((e) => ({ position: e.position as number, name: e.display_name }))}
+                showNumbers={squaresConfig.showSquareNumbers !== false}
+                selectedPosition={claimIsOpen ? claimPosition : null}
+                claimHrefBase={
+                  squaresConfig.locked
+                    ? null
+                    : `/play/${orgSlug}/${fundraiserSlug}/${module_.id}?claim=`
+                }
+                claimHrefSuffix={pwQuery ? `&${pwQuery}` : ""}
+              />
             </CardContent>
           </Card>
         </>

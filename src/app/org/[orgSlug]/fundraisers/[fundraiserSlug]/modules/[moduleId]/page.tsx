@@ -29,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SquaresBoard } from "@/components/squares/squares-board";
 import { Separator } from "@/components/ui/separator";
 import { CopyLinkButton } from "@/components/copy-link-button";
 import {
@@ -39,7 +40,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
 
 const MODULE_TYPE_LABELS: Record<string, string> = {
   product: "Product sale",
@@ -188,6 +188,11 @@ export default async function ModuleAdminPage({
     ]),
   );
 
+  const latestDraw = [...segments]
+    .reverse()
+    .map((segment) => drawBySegment.get(segment))
+    .find(Boolean);
+
   const { data: activity } = isSquares
     ? await supabase
         .from("audit_log")
@@ -244,12 +249,11 @@ export default async function ModuleAdminPage({
   const collectedCents = claimedEntries
     .filter((e) => e.transaction_id)
     .reduce((sum, e) => sum + (e.price_cents ?? 0), 0);
-  const claimedByPosition = new Map(claimedEntries.map((e) => [e.position as number, e]));
 
   const publicPath = `/play/${orgSlug}/${fundraiserSlug}/${module_.id}`;
   const matchupTitle =
     isSquares && (squaresConfig.rowLabel || squaresConfig.colLabel)
-      ? `${squaresConfig.rowLabel || "Team A"} vs. ${squaresConfig.colLabel || "Team B"}`
+      ? `${squaresConfig.colLabel || "Team A"} vs. ${squaresConfig.rowLabel || "Team B"}`
       : MODULE_TYPE_LABELS[module_.type] ?? module_.type;
   const displayTitle = module_.name || matchupTitle;
 
@@ -577,17 +581,17 @@ export default async function ModuleAdminPage({
                                     <input type="hidden" name="orgSlug" value={orgSlug} />
                                     <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
                                     <input type="hidden" name="name" value={event.name} />
-                                    <input type="hidden" name="colLabel" value={event.homeTeam.name} />
-                                    <input type="hidden" name="rowLabel" value={event.awayTeam.name} />
+                                    <input type="hidden" name="colLabel" value={event.awayTeam.name} />
+                                    <input type="hidden" name="rowLabel" value={event.homeTeam.name} />
                                     <input
                                       type="hidden"
                                       name="colColor"
-                                      value={event.homeTeam.color ?? squaresConfig.colColor ?? "#1f2937"}
+                                      value={event.awayTeam.color ?? squaresConfig.colColor ?? "#1f2937"}
                                     />
                                     <input
                                       type="hidden"
                                       name="rowColor"
-                                      value={event.awayTeam.color ?? squaresConfig.rowColor ?? "#6b7280"}
+                                      value={event.homeTeam.color ?? squaresConfig.rowColor ?? "#6b7280"}
                                     />
                                     <input
                                       type="hidden"
@@ -654,7 +658,7 @@ export default async function ModuleAdminPage({
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="colLabel">Column team (top)</Label>
+                        <Label htmlFor="colLabel">Top team (away)</Label>
                         <Input
                           id="colLabel"
                           name="colLabel"
@@ -675,7 +679,7 @@ export default async function ModuleAdminPage({
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="rowLabel">Row team (side)</Label>
+                        <Label htmlFor="rowLabel">Side team (home)</Label>
                         <Input
                           id="rowLabel"
                           name="rowLabel"
@@ -726,6 +730,25 @@ export default async function ModuleAdminPage({
                         ),
                       )}
                     </fieldset>
+                    <div className="flex items-start gap-2">
+                      {/* Marker so the ESPN "Use this game" form, which posts
+                          to the same action without this checkbox, doesn't
+                          read as "unchecked" and switch the numbers off. */}
+                      <input type="hidden" name="showSquareNumbersPresent" value="1" />
+                      <input
+                        id="showSquareNumbers"
+                        name="showSquareNumbers"
+                        type="checkbox"
+                        defaultChecked={squaresConfig.showSquareNumbers !== false}
+                        className="mt-1 h-4 w-4 accent-[var(--selection)]"
+                      />
+                      <Label htmlFor="showSquareNumbers" className="flex flex-col items-start gap-0.5">
+                        Number each square (1–100)
+                        <span className="text-xs font-normal text-muted-foreground">
+                          A label on every square — it doesn&apos;t change picks or scoring.
+                        </span>
+                      </Label>
+                    </div>
                     <Button type="submit" variant="outline">
                       Save board settings
                     </Button>
@@ -757,37 +780,21 @@ export default async function ModuleAdminPage({
                   <span>{collectedCents ? centsToDollars(collectedCents) : "$0.00"} collected</span>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <div
-                    className="grid w-fit gap-px bg-border"
-                    style={{ gridTemplateColumns: "repeat(10, 2rem)" }}
-                  >
-                    {Array.from({ length: 100 }, (_, position) => {
-                      const entry = claimedByPosition.get(position);
-                      const bg = !entry
-                        ? "bg-muted"
-                        : entry.transaction_id
-                          ? "bg-success/20"
-                          : "bg-warning/20";
-                      return (
-                        <div key={position} className="group relative h-8 w-8">
-                          <div
-                            className={cn(
-                              "flex h-8 w-8 items-center justify-center overflow-hidden text-[9px] font-medium text-foreground",
-                              bg,
-                            )}
-                          >
-                            {entry?.display_name?.slice(0, 3) ?? ""}
-                          </div>
-                          {entry?.display_name && (
-                            <span className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs font-medium text-background group-hover:block">
-                              {entry.display_name}
-                            </span>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div className="space-y-2">
+                  <SquaresBoard
+                    colLabel={squaresConfig.colLabel || "Top team"}
+                    rowLabel={squaresConfig.rowLabel || "Side team"}
+                    colColor={squaresConfig.colColor}
+                    rowColor={squaresConfig.rowColor}
+                    colDigits={latestDraw?.result.colDigits}
+                    rowDigits={latestDraw?.result.rowDigits}
+                    entries={claimedEntries.map((e) => ({
+                      position: e.position as number,
+                      name: e.display_name,
+                      status: e.transaction_id ? "paid" : "unpaid",
+                    }))}
+                    showNumbers={squaresConfig.showSquareNumbers !== false}
+                  />
                   <div className="mt-2 flex gap-4 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <span className="inline-block h-3 w-3 bg-muted" /> Open
@@ -893,7 +900,7 @@ export default async function ModuleAdminPage({
                     <TableBody>
                       {claimedEntries.map((entry) => (
                         <TableRow key={entry.id}>
-                          <TableCell className="font-mono">{entry.position}</TableCell>
+                          <TableCell className="font-mono">{(entry.position as number) + 1}</TableCell>
                           <TableCell>{entry.display_name}</TableCell>
                           <TableCell>
                             {entry.price_cents ? centsToDollars(entry.price_cents) : "—"}
@@ -1100,13 +1107,13 @@ function formatActivity(action: string, after: unknown): string {
   const a = (after ?? {}) as Record<string, unknown>;
   switch (action) {
     case "square.paid":
-      return `Square #${a.position} marked paid${
+      return `Square #${Number(a.position) + 1} marked paid${
         typeof a.amount_cents === "number" ? ` (${centsToDollars(a.amount_cents)})` : ""
       }`;
     case "square.payment_voided":
-      return `Payment voided for square #${a.position}`;
+      return `Payment voided for square #${Number(a.position) + 1}`;
     case "square.released":
-      return `Square #${a.position} released (was ${a.display_name})`;
+      return `Square #${Number(a.position) + 1} released (was ${a.display_name})`;
     case "squares.stale_swept":
       return `Released ${
         Array.isArray(a.released_positions) ? a.released_positions.length : 0

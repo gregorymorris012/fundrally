@@ -22,14 +22,19 @@ export async function createProductModuleCore(input: {
   name?: string | null;
 }) {
   const supabase = await createClient();
-  const { error } = await supabase.from("modules").insert({
-    org_id: input.orgId,
-    fundraiser_id: input.fundraiserId,
-    type: "product",
-    status: "active",
-    name: input.name?.trim().slice(0, 80) || null,
-  });
+  const { data, error } = await supabase
+    .from("modules")
+    .insert({
+      org_id: input.orgId,
+      fundraiser_id: input.fundraiserId,
+      type: "product",
+      status: "active",
+      name: input.name?.trim().slice(0, 80) || null,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  return data as { id: string };
 }
 
 export async function createProductModule(formData: FormData) {
@@ -101,18 +106,21 @@ export async function createModule(formData: FormData) {
   const type = String(formData.get("type"));
   const name = String(formData.get("name") ?? "");
 
-  if (type === "product") {
-    await createProductModuleCore({ orgId, fundraiserId, name });
-  } else {
-    await createChanceModuleCore({
-      orgId,
-      fundraiserId,
-      type: type as ChanceModuleType,
-      name,
-    });
-  }
+  const created =
+    type === "product"
+      ? await createProductModuleCore({ orgId, fundraiserId, name })
+      : await createChanceModuleCore({
+          orgId,
+          fundraiserId,
+          type: type as ChanceModuleType,
+          name,
+        });
 
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}`);
+  revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules`);
+  // Land in the module just created (to configure it) instead of bouncing
+  // back to the list and making the admin find it and click Manage.
+  redirect(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${created.id}`);
 }
 
 // Module lifecycle (CLAUDE.md item 2 / build spec): create -> configure ->
@@ -278,6 +286,12 @@ export async function updateSquaresBoard(formData: FormData) {
     colColor: colColorRaw || undefined,
     pricePerSquareCents,
     payoutStructure: payoutStructureRaw as SquaresConfig["payoutStructure"],
+    // Only the full board-settings form carries this checkbox; the ESPN
+    // "Use this game" form doesn't, so absent means "leave it alone".
+    showSquareNumbers:
+      formData.get("showSquareNumbersPresent") != null
+        ? formData.get("showSquareNumbers") === "on"
+        : current.showSquareNumbers,
   };
 
   // name is a real column, not part of config (see db/schema/modules.ts).

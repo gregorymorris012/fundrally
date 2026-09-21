@@ -29,6 +29,7 @@
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
   --color-ring: var(--ring);
+  --color-selection: var(--selection);
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
@@ -78,7 +79,11 @@
   --warning: oklch(0.7779 0.1687 69.79);
   --border: oklch(0.912 0.008 251);
   --input: oklch(0.912 0.008 251);
-  --ring: oklch(0.68 0.19 50);
+  /* Focus rings and "selected" outlines: a deep blue, deliberately not the
+     brand orange (--primary) and not a light blue, so a selected card,
+     square, or focused field stands out from the surrounding lines. */
+  --ring: oklch(0.379 0.146 265.5);
+  --selection: oklch(0.379 0.146 265.5);
   --chart-1: oklch(0.68 0.19 50);
   --chart-2: oklch(0.2328 0.068 251.16);
   --chart-3: oklch(0.6747 0.2069 142.07);
@@ -115,7 +120,8 @@
   --warning: oklch(0.8 0.16 70);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.62 0.17 262);
+  --selection: oklch(0.62 0.17 262);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);

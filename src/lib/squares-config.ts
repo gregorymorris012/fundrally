@@ -16,6 +16,9 @@ export type SquaresConfig = {
   locked?: boolean;
   payoutStructure?: "final_only" | "half_final" | "quarters";
   espnEventId?: string | null;
+  // Visual 1-100 label on each square; defaults to on. Purely cosmetic —
+  // positions stay 0-99 internally and this never affects picks or scoring.
+  showSquareNumbers?: boolean;
 };
 
 export type DrawSegment = "q1" | "q2" | "q3" | "half" | "final";
