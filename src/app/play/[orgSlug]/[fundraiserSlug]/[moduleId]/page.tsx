@@ -13,6 +13,9 @@ import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SquaresBoard } from "@/components/squares/squares-board";
 import { cn } from "@/lib/utils";
+import type { QohConfig } from "@/lib/queen-of-hearts-config";
+import type { QohEntry, WeeklyDrawSummary } from "@/lib/queen-of-hearts-rules";
+import { QohInfo } from "@/components/queen-of-hearts/qoh-info";
 
 const MODULE_TYPE_LABELS: Record<string, string> = {
   squares: "Squares",
@@ -82,7 +85,37 @@ export default async function PlayModulePage({
   if (!module_) notFound();
 
   const isSquares = module_.type === "squares";
+  const isQueenOfHearts = module_.type === "queen_of_hearts";
   const squaresConfig = (module_.config as SquaresConfig | null) ?? {};
+  const qohConfig = (module_.config as QohConfig | null) ?? {};
+
+  // Phase 3 (org-admin UI) shipped before Phase 4 (this page's real QoH
+  // entry flow). Rather than let a QoH visitor fall through to the
+  // generic join-form fallback below — which calls joinModuleCore, which
+  // doesn't set cycle_number/card_number and would silently create an
+  // orphaned entry belonging to no cycle — show the rules/jackpot
+  // read-only until the real flow exists. See "Queen of Hearts" in
+  // CLAUDE.md.
+  const { data: qohEntriesForInfo } = isQueenOfHearts
+    ? await supabase
+        .from("module_entries")
+        .select("id, cycle_number, display_name, card_number, quantity")
+        .eq("module_id", module_.id)
+    : { data: [] };
+  const qohEntriesTyped: QohEntry[] = (qohEntriesForInfo ?? []).map((e) => ({
+    id: e.id as string,
+    cycleNumber: e.cycle_number as number,
+    displayName: e.display_name,
+    cardNumber: e.card_number,
+    quantity: e.quantity,
+  }));
+  const { data: qohWeeklyDrawRowsForInfo } = isQueenOfHearts
+    ? await supabase.from("draws").select("result").eq("module_id", module_.id).eq("segment", "weekly_draw")
+    : { data: [] };
+  const qohWeeklyDrawsForInfo: WeeklyDrawSummary[] = (qohWeeklyDrawRowsForInfo ?? []).map((r) => {
+    const result = r.result as { cycleNumber: number; outcome: "JACKPOT" | "CONSOLATION"; revealedPosition: number };
+    return { cycleNumber: result.cycleNumber, outcome: result.outcome, revealedPosition: result.revealedPosition };
+  });
   const colLabel = squaresConfig.colLabel || "Team A"; // across the top
   const rowLabel = squaresConfig.rowLabel || "Team B"; // down the side
 
@@ -173,6 +206,20 @@ export default async function PlayModulePage({
             </form>
           </CardContent>
         </Card>
+      ) : isQueenOfHearts ? (
+        <>
+          <QohInfo config={qohConfig} entries={qohEntriesTyped} weeklyDraws={qohWeeklyDrawsForInfo} />
+          <Card>
+            <CardHeader>
+              <CardTitle>Entries aren&apos;t open here yet</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-sm text-muted-foreground">
+                The organizer is still setting up online entry for this pool. Ask them how to join for now.
+              </p>
+            </CardContent>
+          </Card>
+        </>
       ) : isSquares ? (
         <>
           {claimIsOpen && (

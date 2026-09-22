@@ -212,7 +212,7 @@ describe("queen of hearts lifecycle", () => {
     // so re-picking it is refused even in the new cycle.
     await expect(
       enterQueenOfHeartsCore({ orgId: orgAId, moduleId, displayName: "Dee", cardNumber: 5, confirmedAge18Plus: true }),
-    ).resolves.toBeUndefined();
+    ).resolves.toMatchObject({ paidError: null });
     const { data: cycle2Entry } = await serviceClient()
       .from("module_entries")
       .select("cycle_number")
@@ -301,6 +301,66 @@ describe("queen of hearts lifecycle", () => {
       .eq("adjusts_transaction_id", transactionId)
       .single();
     expect(adjustment).toMatchObject({ kind: "adjustment", gross_cents: -1000 });
+  });
+
+  it("records an in-person entry already marked paid in one step (the admin add-entry panel's path)", async () => {
+    const moduleId = await createModule(orgAId, fundraiserAId, { ticketPriceCents: 500 });
+
+    const { entryId, paidError } = await enterQueenOfHeartsCore({
+      orgId: orgAId,
+      moduleId,
+      displayName: "Cash Buyer",
+      cardNumber: 20,
+      confirmedAge18Plus: true,
+      markPaid: true,
+      method: "cash",
+      fundraiserId: fundraiserAId,
+      actor: userA.userId,
+    });
+    expect(paidError).toBeNull();
+
+    const { data: entry } = await serviceClient()
+      .from("module_entries")
+      .select("transaction_id")
+      .eq("id", entryId)
+      .single();
+    expect(entry?.transaction_id).toBeTruthy();
+    const { data: tx } = await serviceClient()
+      .from("transactions")
+      .select("kind, gross_cents, module_id")
+      .eq("id", entry!.transaction_id)
+      .single();
+    expect(tx).toMatchObject({ kind: "donation", gross_cents: 500, module_id: moduleId });
+  });
+
+  it("requires fundraiserId and actor to mark-paid-on-entry, and reports (not throws) a failed mark-paid", async () => {
+    const moduleId = await createModule(orgAId, fundraiserAId, { ticketPriceCents: 500 });
+
+    await expect(
+      enterQueenOfHeartsCore({
+        orgId: orgAId,
+        moduleId,
+        displayName: "Missing Fields",
+        confirmedAge18Plus: true,
+        markPaid: true,
+      }),
+    ).rejects.toThrow(/fundraiserId and actor/i);
+
+    // A bogus fundraiserId makes the offline-gift write fail — the entry
+    // itself is still created, and the failure comes back as paidError,
+    // not a throw (an admin form shows this inline, it doesn't crash).
+    const { entryId, paidError } = await enterQueenOfHeartsCore({
+      orgId: orgAId,
+      moduleId,
+      displayName: "Bad Fundraiser",
+      confirmedAge18Plus: true,
+      markPaid: true,
+      fundraiserId: randomUUID(),
+      actor: userA.userId,
+    });
+    expect(paidError).toBeTruthy();
+    const { data: entry } = await serviceClient().from("module_entries").select("id").eq("id", entryId).maybeSingle();
+    expect(entry?.id).toBe(entryId);
   });
 
   it("scopes every Core action to the org it's called with — org B can't touch org A's pool", async () => {

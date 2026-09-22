@@ -402,8 +402,53 @@ weekly draw with its live-pick pause. A few things worth knowing:
   supabase_auth_fundrally env | grep TEST_OTP` after a restart and seeing
   the new number still missing).
 
-Not built yet: admin UI, public UI. See "Squares pools" above for the
-tab/checklist/payouts pattern this should follow.
+Org-admin UI is built (`src/components/queen-of-hearts/*` +
+the `queen_of_hearts` branch in the modules `[moduleId]/page.tsx`), same
+tab/checklist pattern as squares (Grid/Players/Settings/Rules/Share,
+`?tab=`). A few things worth knowing:
+
+- **`QohAdminBoard`'s "add an entry" panel needed `enterQueenOfHeartsCore`
+  extended** with optional `markPaid`/`method`/`fundraiserId`/`actor` —
+  the organizer recording an in-person cash sale wants to enter-and-mark-
+  paid in one step, mirroring `assignSquareCore`. This is a **second
+  wrapper**, `addQueenOfHeartsEntryAsAdmin` (admin-gated, redirects with
+  an error/success param), alongside the original guest-facing
+  `enterQueenOfHearts` (no auth, no redirect) — they share the one Core
+  function but can't share a wrapper, since their redirect behavior
+  differs. `enterQueenOfHeartsCore` now returns `{ entryId, paidError }`
+  instead of `void`.
+- **The board only ever shows the *current* cycle's unrevealed claims**,
+  not stale ones from a past cycle — a claimed-but-never-drawn number from
+  cycle 1 is available again in cycle 2 (numbers reset each cycle; only
+  the actual winning position per cycle is permanently revealed, via the
+  `(module_id, cycle_number, card_number)` partial unique index). Filter
+  entries by `cycleNumber === currentCycleNumber(...)` before handing
+  them to `QohBoard`/`QohAdminBoard`, or old claims bleed into the wrong
+  cycle's grid.
+- **Found and fixed a real gap while wiring this up, not just a
+  theoretical one**: the public `/play/.../[moduleId]` page's fallback
+  for any module type it doesn't specifically handle is a generic "Join"
+  form posting to `joinModuleCore` — which doesn't set
+  `cycle_number`/`card_number`, so a guest hitting it for a
+  `queen_of_hearts` module (reachable right now, via the admin's "View
+  public page" link or a shared invite link) would silently create an
+  orphaned entry belonging to no cycle. Phase 4 (the real public entry
+  flow) isn't built yet, so that page now shows a read-only `QohInfo`
+  (rules/jackpot) plus "entries aren't open here yet" instead of falling
+  through to the broken generic form.
+- Verified by seeding a local pool (shuffled board, entries across two
+  cycles, one resolved consolation draw) and fetching every tab plus the
+  public page with a minted session cookie — confirmed against the raw
+  HTML, not just "the build passed." One thing worth knowing if you do
+  this again: Next's RSC streaming payload splits interpolated JSX text
+  into separate array elements (`["Draw cycle #", 2, " now (", 2, "
+  entries)"]`), so a naive substring search for the literal rendered
+  string (e.g. `"Draw cycle #2 now"`) gives a false "missing" even when
+  the value is correct — check the split fragments individually, or
+  render in a real browser, before concluding something's broken.
+
+Not built yet: the real public entry flow (Phase 4) — picking a number,
+day-of entry, the actual board display for guests.
 
 ### RLS testing
 

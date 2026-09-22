@@ -31,6 +31,22 @@ import {
   releaseSquare,
   releaseStaleSquares,
 } from "@/lib/module-entries";
+import {
+  addQueenOfHeartsEntryAsAdmin,
+  enterQueenOfHearts,
+  markQueenOfHeartsEntryPaid,
+  voidQueenOfHeartsEntryPayment,
+  shuffleQueenOfHeartsBoard,
+  conductQueenOfHeartsDraw,
+  resolveQueenOfHeartsLivePick,
+  updateQueenOfHeartsRules,
+} from "@/lib/queen-of-hearts";
+import type { QohCard, QohConfig } from "@/lib/queen-of-hearts-config";
+import { computeJackpotTotals, currentCycleNumber, resolveRules as resolveQohRules, revealedPositions as qohRevealedPositions, type QohEntry, type WeeklyDrawSummary, type ResolvedDraw } from "@/lib/queen-of-hearts-rules";
+import { QohBoard } from "@/components/queen-of-hearts/qoh-board";
+import { QohAdminBoard, type QohAdminEntry } from "@/components/queen-of-hearts/qoh-admin-board";
+import { QohRulesForm } from "@/components/queen-of-hearts/qoh-rules-form";
+import { QohInfo } from "@/components/queen-of-hearts/qoh-info";
 import { searchUpcomingEspnEvents, type EspnLeague } from "@/lib/sports-data/espn";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -117,6 +133,12 @@ export default async function ModuleAdminPage({
     tab?: string;
     assigned?: string;
     assignError?: string;
+    rulesSaved?: string;
+    rulesError?: string;
+    drawResolved?: string;
+    drawError?: string;
+    entryAdded?: string;
+    entryError?: string;
   }>;
 }) {
   const { orgSlug, fundraiserSlug, moduleId } = await params;
@@ -131,6 +153,12 @@ export default async function ModuleAdminPage({
     tab: tabParam,
     assigned,
     assignError,
+    rulesSaved,
+    rulesError,
+    drawResolved,
+    drawError,
+    entryAdded,
+    entryError,
   } = await searchParams;
   const supabase = await createClient();
 
@@ -173,7 +201,9 @@ export default async function ModuleAdminPage({
 
   const isChanceModule = CHANCE_MODULE_TYPES.includes(module_.type);
   const isSquares = module_.type === "squares";
+  const isQueenOfHearts = module_.type === "queen_of_hearts";
   const squaresConfig = (module_.config as SquaresConfig | null) ?? {};
+  const qohConfig = (module_.config as QohConfig | null) ?? {};
   const rules = resolveRules(squaresConfig);
 
   const { data: entries } = isSquares
@@ -201,7 +231,56 @@ export default async function ModuleAdminPage({
     : { data: [] };
   const draw = draws?.[0]?.result as { rowDigits: number[]; colDigits: number[] } | undefined;
 
-  const { data: activity } = isSquares
+  // All entries, every cycle — needed for the running jackpot total (which
+  // grows across the whole game) and the Players tab's full history.
+  const { data: qohEntriesRaw } = isQueenOfHearts
+    ? await supabase
+        .from("module_entries")
+        .select("id, display_name, cycle_number, card_number, quantity, price_cents, transaction_id, created_at")
+        .eq("module_id", module_.id)
+        .order("created_at", { ascending: true })
+    : { data: [] };
+  const qohEntries: QohEntry[] = (qohEntriesRaw ?? []).map((e) => ({
+    id: e.id as string,
+    cycleNumber: e.cycle_number as number,
+    displayName: e.display_name,
+    cardNumber: e.card_number,
+    quantity: e.quantity,
+  }));
+
+  // The one-time board_shuffle draw (admin-only — never sent to the public
+  // page) and every weekly_draw so far, oldest first.
+  const { data: qohBoardDraw } = isQueenOfHearts
+    ? await supabase
+        .from("draws")
+        .select("result")
+        .eq("module_id", module_.id)
+        .eq("segment", "board_shuffle")
+        .maybeSingle()
+    : { data: null };
+  const qohBoard = (qohBoardDraw?.result as { board: QohCard[] } | undefined)?.board ?? null;
+
+  const { data: qohWeeklyDrawRows } = isQueenOfHearts
+    ? await supabase
+        .from("draws")
+        .select("result")
+        .eq("module_id", module_.id)
+        .eq("segment", "weekly_draw")
+        .order("cycle_number", { ascending: true })
+    : { data: [] };
+  const qohWeeklyDraws: ResolvedDraw[] = (qohWeeklyDrawRows ?? []).map((r) => r.result as ResolvedDraw);
+  const qohWeeklyDrawSummaries: WeeklyDrawSummary[] = qohWeeklyDraws.map((d) => ({
+    cycleNumber: d.cycleNumber,
+    outcome: d.outcome,
+    revealedPosition: d.revealedPosition,
+  }));
+  const qohCycle = currentCycleNumber(qohWeeklyDrawSummaries);
+  const qohRules = resolveQohRules(qohConfig);
+  const qohTotals = computeJackpotTotals(qohRules, qohEntries, qohConfig.jackpotSeedCents ?? 0);
+  const qohRevealed = qohRevealedPositions(qohWeeklyDrawSummaries);
+  const qohEntryNameById = new Map(qohEntries.map((e) => [e.id, e.displayName]));
+
+  const { data: activity } = isSquares || isQueenOfHearts
     ? await supabase
         .from("audit_log")
         .select("id, actor, action, after, created_at")
@@ -294,6 +373,56 @@ export default async function ModuleAdminPage({
   const collectedCents = claimedEntries
     .filter((e) => e.transaction_id)
     .reduce((sum, e) => sum + (e.price_cents ?? 0), 0);
+
+  // Queen of Hearts' own tabs/checklist — distinct names from squares'
+  // TABS/tab/setupSteps above since both blocks are siblings in this
+  // function, not because the pattern differs.
+  const qohTabs = [
+    { key: "grid", label: "Grid" },
+    { key: "players", label: `Players (${qohEntries.length})` },
+    ...(isAdmin ? [{ key: "settings", label: "Settings" }] : []),
+    { key: "rules", label: "Rules" },
+    { key: "share", label: "Share" },
+  ];
+  const qohTab = qohTabs.some((t) => t.key === tabParam) ? (tabParam as string) : "grid";
+  const qohModulePath = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${module_.id}`;
+  const qohTabHref = (key: string) => `${qohModulePath}?tab=${key}`;
+
+  const qohSetupSteps = [
+    {
+      label: "Set the price and jackpot split",
+      done: qohConfig.ticketPriceCents != null,
+      href: `${qohTabHref("settings")}#rules`,
+    },
+    {
+      label: "Confirm compliance",
+      done: qohConfig.organizerConfirmedCompliance === true,
+      href: `${qohTabHref("settings")}#rules`,
+    },
+    { label: "Shuffle the board", done: !!qohBoard, href: `${qohTabHref("grid")}#draw` },
+    { label: "Launch the pool", done: module_.status !== "draft", href: "#lifecycle" },
+    { label: "Share the invite link", done: qohEntries.length > 0, href: qohTabHref("share") },
+  ];
+  const qohSetupDone = qohSetupSteps.filter((step) => step.done).length;
+
+  // Current cycle's board claims only (an unrevealed claim from a past
+  // cycle is stale — numbers reset each cycle, see module-entries.ts) —
+  // permanent reveals (qohWeeklyDraws) are separate and span every cycle.
+  const qohBoardEntries: QohAdminEntry[] = qohCycle === "completed"
+    ? []
+    : qohEntries
+        .filter((e) => e.cycleNumber === qohCycle && e.cardNumber != null)
+        .map((e) => {
+          const raw = qohEntriesRaw!.find((r) => r.id === e.id)!;
+          return {
+            position: e.cardNumber as number,
+            name: e.displayName,
+            entryDisplayName: e.displayName,
+            id: e.id,
+            status: raw.transaction_id ? ("paid" as const) : ("unpaid" as const),
+          };
+        });
+  const qohReveals = qohWeeklyDraws.map((d) => ({ position: d.revealedPosition, card: d.card }));
 
   const publicPath = `/play/${orgSlug}/${fundraiserSlug}/${module_.id}`;
   const matchupTitle =
@@ -506,7 +635,7 @@ export default async function ModuleAdminPage({
         </div>
       )}
 
-      {isChanceModule && !isSquares && (
+      {isChanceModule && !isSquares && !isQueenOfHearts && (
         <div className="max-w-2xl">
           <Card>
             <CardHeader>
@@ -1351,6 +1480,412 @@ export default async function ModuleAdminPage({
           </div>
         </div>
       )}
+
+      {isQueenOfHearts && (
+        <div className="flex flex-col gap-6">
+          <nav className="-mb-2 flex gap-1 overflow-x-auto border-b border-border" aria-label="Pool sections">
+            {qohTabs.map((t) => (
+              <Link
+                key={t.key}
+                href={qohTabHref(t.key)}
+                aria-current={qohTab === t.key ? "page" : undefined}
+                className={cn(
+                  "-mb-px shrink-0 border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
+                  qohTab === t.key
+                    ? "border-selection text-foreground"
+                    : "border-transparent text-muted-foreground hover:text-foreground",
+                )}
+              >
+                {t.label}
+              </Link>
+            ))}
+          </nav>
+
+          {qohTab === "grid" && isAdmin && qohSetupDone < qohSetupSteps.length && (
+            <Card>
+              <CardHeader>
+                <CardTitle>
+                  Set up your pool ({qohSetupDone} of {qohSetupSteps.length})
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ol className="space-y-1.5">
+                  {qohSetupSteps.map((step) => (
+                    <li key={step.label}>
+                      <Link href={step.href} className="flex items-center gap-2.5 text-sm hover:underline">
+                        <span
+                          className={cn(
+                            "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-bold",
+                            step.done ? "border-success bg-success text-white" : "border-border text-transparent",
+                          )}
+                          aria-hidden
+                        >
+                          ✓
+                        </span>
+                        <span className={step.done ? "text-muted-foreground line-through" : "text-foreground"}>
+                          {step.label}
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ol>
+              </CardContent>
+            </Card>
+          )}
+
+          {qohTab === "rules" && (
+            <>
+              <p className="text-sm text-muted-foreground">
+                This is what players see on the public page. It&apos;s generated from your
+                settings{isAdmin ? " — change it under Settings" : ""}.
+              </p>
+              <QohInfo config={qohConfig} entries={qohEntries} weeklyDraws={qohWeeklyDrawSummaries} />
+            </>
+          )}
+
+          {qohTab === "grid" && (
+            <>
+              {drawResolved && (
+                <Alert variant="success">
+                  <AlertTitle>Drawing resolved</AlertTitle>
+                </Alert>
+              )}
+              {drawError && (
+                <Alert variant="destructive">
+                  <AlertTitle>Draw not resolved</AlertTitle>
+                  <AlertDescription>{drawError}</AlertDescription>
+                </Alert>
+              )}
+              {entryAdded && (
+                <Alert variant="success">
+                  <AlertTitle>Entry added</AlertTitle>
+                </Alert>
+              )}
+              {entryError && (
+                <Alert variant="destructive">
+                  <AlertTitle>Entry not added</AlertTitle>
+                  <AlertDescription>{entryError}</AlertDescription>
+                </Alert>
+              )}
+
+              <Card id="board" className="scroll-mt-6">
+                <CardHeader>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <CardTitle>
+                      Board — {qohCycle === "completed" ? "game over" : `cycle #${qohCycle}`} · {qohRevealed.size} of
+                      54 revealed
+                    </CardTitle>
+                    {module_.status === "active" && (
+                      <a href={publicPath} className={buttonVariants({ variant: "outline", size: "sm" })}>
+                        View public page
+                      </a>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {isAdmin ? (
+                    <QohAdminBoard
+                      entries={qohBoardEntries}
+                      reveals={qohReveals}
+                      showNumbers={qohConfig.showBoardNumbers !== false}
+                      ids={{ orgId: org.id, fundraiserId: fundraiser.id, moduleId: module_.id, orgSlug, fundraiserSlug }}
+                      priceLabel={qohConfig.ticketPriceCents ? centsToDollars(qohConfig.ticketPriceCents) : null}
+                      actions={{
+                        enter: addQueenOfHeartsEntryAsAdmin,
+                        markPaid: markQueenOfHeartsEntryPaid,
+                        voidPayment: voidQueenOfHeartsEntryPayment,
+                      }}
+                    />
+                  ) : (
+                    <QohBoard
+                      entries={qohBoardEntries}
+                      reveals={qohReveals}
+                      showNumbers={qohConfig.showBoardNumbers !== false}
+                    />
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card id="draw" className="scroll-mt-6">
+                <CardHeader>
+                  <CardTitle>Shuffle &amp; draw</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!qohBoard ? (
+                    isAdmin ? (
+                      <form action={shuffleQueenOfHeartsBoard}>
+                        <input type="hidden" name="orgId" value={org.id} />
+                        <input type="hidden" name="moduleId" value={module_.id} />
+                        <input type="hidden" name="orgSlug" value={orgSlug} />
+                        <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          size="sm"
+                          disabled={!qohConfig.organizerConfirmedCompliance}
+                        >
+                          Shuffle the board
+                        </Button>
+                        {!qohConfig.organizerConfirmedCompliance && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Confirm compliance under Settings first.
+                          </p>
+                        )}
+                      </form>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">The board hasn&apos;t been shuffled yet.</p>
+                    )
+                  ) : qohCycle === "completed" ? (
+                    <p className="text-sm text-muted-foreground">
+                      This game has ended — the Queen of Hearts was drawn.
+                    </p>
+                  ) : qohConfig.pendingDrawing ? (
+                    isAdmin ? (
+                      <form action={resolveQueenOfHeartsLivePick} className="flex flex-wrap items-end gap-3">
+                        <input type="hidden" name="orgId" value={org.id} />
+                        <input type="hidden" name="moduleId" value={module_.id} />
+                        <input type="hidden" name="orgSlug" value={orgSlug} />
+                        <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                        <div className="space-y-1.5">
+                          <Label htmlFor="qoh-live-pick">
+                            {qohEntryNameById.get(qohConfig.pendingDrawing.entryId) ?? "This entry"}&apos;s live pick
+                            (1–54)
+                          </Label>
+                          <Input
+                            id="qoh-live-pick"
+                            name="cardNumber"
+                            type="number"
+                            min={1}
+                            max={54}
+                            required
+                            className="w-24"
+                          />
+                        </div>
+                        <Button type="submit" size="sm">
+                          Resolve
+                        </Button>
+                      </form>
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Waiting on a live number pick from this cycle&apos;s winner.
+                      </p>
+                    )
+                  ) : isAdmin ? (
+                    <form action={conductQueenOfHeartsDraw}>
+                      <input type="hidden" name="orgId" value={org.id} />
+                      <input type="hidden" name="moduleId" value={module_.id} />
+                      <input type="hidden" name="orgSlug" value={orgSlug} />
+                      <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                      <Button type="submit" variant="outline" size="sm">
+                        Draw cycle #{qohCycle} now ({qohEntries.filter((e) => e.cycleNumber === qohCycle).length}{" "}
+                        entries)
+                      </Button>
+                    </form>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">Not drawn yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {qohWeeklyDraws.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Draw history</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="divide-y divide-border rounded-lg border border-border text-sm">
+                      {qohWeeklyDraws.map((d) => (
+                        <div key={d.cycleNumber} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                          <div>
+                            <p className="font-medium text-foreground">
+                              Cycle #{d.cycleNumber} — #{d.revealedPosition} · {d.card.label}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {qohEntryNameById.get(d.winningEntryId) ?? "Unknown entrant"}
+                            </p>
+                          </div>
+                          <p className="font-medium text-foreground">
+                            {d.outcome === "JACKPOT"
+                              ? `Jackpot — ${centsToDollars(d.payoutCents ?? 0)}`
+                              : centsToDollars(d.prizeCents ?? 0)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+
+          {qohTab === "players" && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Entries ({qohEntries.length})</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {qohEntriesRaw!.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Cycle</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>#</TableHead>
+                          <TableHead>Qty</TableHead>
+                          <TableHead>Price</TableHead>
+                          <TableHead>Status</TableHead>
+                          {isAdmin && <TableHead className="text-right">Actions</TableHead>}
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {qohEntriesRaw!
+                          .slice()
+                          .reverse()
+                          .map((e) => (
+                            <TableRow key={e.id}>
+                              <TableCell>{e.cycle_number}</TableCell>
+                              <TableCell>{e.display_name}</TableCell>
+                              <TableCell className="font-mono">{e.card_number ?? "day-of"}</TableCell>
+                              <TableCell>{e.quantity}</TableCell>
+                              <TableCell>{e.price_cents ? centsToDollars(e.price_cents) : "—"}</TableCell>
+                              <TableCell>{e.transaction_id ? "Paid" : "Unpaid"}</TableCell>
+                              {isAdmin && (
+                                <TableCell className="text-right">
+                                  {e.transaction_id ? (
+                                    <form action={voidQueenOfHeartsEntryPayment} className="inline-flex">
+                                      <input type="hidden" name="orgId" value={org.id} />
+                                      <input type="hidden" name="moduleId" value={module_.id} />
+                                      <input type="hidden" name="orgSlug" value={orgSlug} />
+                                      <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                                      <input type="hidden" name="entryId" value={e.id} />
+                                      <Button type="submit" variant="outline" size="sm">
+                                        Void
+                                      </Button>
+                                    </form>
+                                  ) : (
+                                    <form action={markQueenOfHeartsEntryPaid} className="inline-flex items-center gap-2">
+                                      <input type="hidden" name="orgId" value={org.id} />
+                                      <input type="hidden" name="fundraiserId" value={fundraiser.id} />
+                                      <input type="hidden" name="moduleId" value={module_.id} />
+                                      <input type="hidden" name="orgSlug" value={orgSlug} />
+                                      <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                                      <input type="hidden" name="entryId" value={e.id} />
+                                      <input type="hidden" name="method" value="cash" />
+                                      <Button type="submit" size="sm">
+                                        Mark paid
+                                      </Button>
+                                    </form>
+                                  )}
+                                </TableCell>
+                              )}
+                            </TableRow>
+                          ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No entries yet.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              {activity && activity.length > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Activity log</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2">
+                    {activity.map((row) => (
+                      <div key={row.id} className="flex items-center justify-between text-sm">
+                        <span>{formatActivity(row.action, row.after)}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(row.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+            </>
+          )}
+
+          {qohTab === "settings" && isAdmin && (
+            <Card id="rules" className="scroll-mt-6">
+              <CardHeader>
+                <CardTitle>Rules</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {rulesSaved && (
+                  <Alert variant="success">
+                    <AlertTitle>Rules saved</AlertTitle>
+                  </Alert>
+                )}
+                {rulesError && (
+                  <Alert variant="destructive">
+                    <AlertTitle>Rules not saved</AlertTitle>
+                    <AlertDescription>{rulesError}</AlertDescription>
+                  </Alert>
+                )}
+                <QohRulesForm
+                  action={updateQueenOfHeartsRules}
+                  orgId={org.id}
+                  moduleId={module_.id}
+                  orgSlug={orgSlug}
+                  fundraiserSlug={fundraiserSlug}
+                  entryCount={qohEntries.length}
+                  initial={qohConfig}
+                />
+              </CardContent>
+            </Card>
+          )}
+
+          {qohTab === "share" && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Public entry page</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <p className="text-sm text-muted-foreground">
+                    Share this link so people can join — free demo entry, no in-app payment. {qohEntries.length}{" "}
+                    entered so far. Log any real-world money collected via the Players tab or offline gift entry,
+                    tagged to this module.
+                  </p>
+                  {module_.status === "active" ? (
+                    <CopyLinkButton path={publicPath} variant="outline" size="sm" />
+                  ) : (
+                    <p className="text-xs text-muted-foreground">Launch this module to make the entry page public.</p>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Pool details</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Jackpot</span>
+                    <span>{centsToDollars(qohTotals.jackpotCents)}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Cycle</span>
+                    <span>{qohCycle === "completed" ? "Game over" : `#${qohCycle}`}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Entries</span>
+                    <span>{qohEntries.length}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground">Board shuffled</span>
+                    <span>{qohBoard ? "Yes" : "No"}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1374,6 +1909,22 @@ function formatActivity(action: string, after: unknown): string {
       return "Board locked";
     case "squares.unlocked":
       return "Board unlocked";
+    case "qoh.board_shuffled":
+      return "Board shuffled";
+    case "qoh.draw_awaiting_live_pick":
+      return `Cycle #${a.cycle_number}: ${a.entry_name ?? "an entrant"} drawn — waiting on their live pick`;
+    case "qoh.draw_resolved": {
+      const outcome = a.outcome === "JACKPOT" ? "Jackpot!" : "Consolation prize";
+      return `Cycle #${a.cycle_number} drawn — #${a.revealed_position} (${outcome})`;
+    }
+    case "qoh.entry_paid":
+      return `Entry marked paid${
+        typeof a.amount_cents === "number" ? ` (${centsToDollars(a.amount_cents)})` : ""
+      }`;
+    case "qoh.entry_payment_voided":
+      return "Payment voided for an entry";
+    case "qoh.rules_updated":
+      return "Pool rules updated";
     default:
       return action;
   }

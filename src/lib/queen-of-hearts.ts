@@ -267,6 +267,13 @@ export async function shuffleQueenOfHeartsBoard(formData: FormData) {
 // price at entry time — the entry's total, not a per-unit price (unlike
 // squares' price_cents, which is per-square) — so a later price change
 // never retroactively changes what an already-recorded entry owes.
+//
+// markPaid/method/fundraiserId are for the organizer's own "add an
+// in-person entry" panel (QohAdminBoard) — someone paid cash on the spot,
+// so it's recorded and marked paid in one step, mirroring
+// assignSquareCore. The public entry form never sets these. A failed
+// paid-mark is reported, not rolled back — the entry still exists and can
+// be marked paid separately.
 export async function enterQueenOfHeartsCore(input: {
   orgId: string;
   moduleId: string;
@@ -275,7 +282,11 @@ export async function enterQueenOfHeartsCore(input: {
   cardNumber?: number | null;
   quantity?: number;
   confirmedAge18Plus: boolean;
-}) {
+  markPaid?: boolean;
+  method?: "cash" | "check" | "in_kind" | "other";
+  fundraiserId?: string;
+  actor?: string; // required if markPaid is true (attributed to whoever recorded the cash)
+}): Promise<{ entryId: string; paidError: string | null }> {
   const displayName = input.displayName.trim().slice(0, MAX_NAME_LENGTH);
   if (!displayName) throw new Error("name is required");
   if (input.confirmedAge18Plus !== true) {
@@ -316,28 +327,54 @@ export async function enterQueenOfHeartsCore(input: {
   const rules = resolveRules(config);
   const priceCents = quantity * rules.ticketPriceCents;
 
-  const { error } = await admin.from("module_entries").insert({
-    org_id: input.orgId,
-    module_id: input.moduleId,
-    display_name: displayName,
-    note: input.note?.trim() || null,
-    cycle_number: cycle,
-    card_number: cardNumber,
-    quantity,
-    price_cents: priceCents,
-  });
+  const { data: inserted, error } = await admin
+    .from("module_entries")
+    .insert({
+      org_id: input.orgId,
+      module_id: input.moduleId,
+      display_name: displayName,
+      note: input.note?.trim() || null,
+      cycle_number: cycle,
+      card_number: cardNumber,
+      quantity,
+      price_cents: priceCents,
+    })
+    .select("id")
+    .single();
   if (error) {
     if (error.code === UNIQUE_VIOLATION) {
       throw new Error(`number ${cardNumber} is already taken this cycle — pick another`);
     }
     throw error;
   }
+  const entryId = inserted!.id as string;
   // Not audited, same precedent as squares' joinModuleCore: a guest's own
   // free entry isn't a money-touching or random/admin outcome (rule 5).
   // Admin-driven actions on this data (mark paid, void, the draw itself)
   // are audited below.
+
+  let paidError: string | null = null;
+  if (input.markPaid) {
+    if (!input.fundraiserId || !input.actor) throw new Error("fundraiserId and actor are required to mark paid");
+    try {
+      await markQueenOfHeartsEntryPaidCore({
+        orgId: input.orgId,
+        fundraiserId: input.fundraiserId,
+        moduleId: input.moduleId,
+        entryId,
+        method: input.method ?? "cash",
+        enteredBy: input.actor,
+      });
+    } catch (err) {
+      paidError = err instanceof Error ? err.message : "couldn't mark it paid";
+    }
+  }
+  return { entryId, paidError };
 }
 
+// Public-facing entry form. No auth (guests have no session), no
+// markPaid support (that's the admin-only path below), no redirect —
+// matches joinModule's shape.
 export async function enterQueenOfHearts(formData: FormData) {
   const orgId = String(formData.get("orgId"));
   const moduleId = String(formData.get("moduleId"));
@@ -362,6 +399,56 @@ export async function enterQueenOfHearts(formData: FormData) {
 
   revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
   revalidatePath(`/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`);
+}
+
+// Organizer's "add an in-person entry" panel (QohAdminBoard) — someone
+// paid cash on the spot; optionally marks it paid in the same step.
+// Mirrors assignSquareAsAdmin's shape: admin-gated, errors bounce back
+// with a message in the URL instead of throwing (Next's generic error
+// page would be a bad outcome from an inline panel).
+export async function addQueenOfHeartsEntryAsAdmin(formData: FormData) {
+  const orgId = String(formData.get("orgId"));
+  const fundraiserId = String(formData.get("fundraiserId"));
+  const moduleId = String(formData.get("moduleId"));
+  const orgSlug = String(formData.get("orgSlug"));
+  const fundraiserSlug = String(formData.get("fundraiserSlug"));
+  const back = `/org/${orgSlug}/fundraisers/${fundraiserSlug}/modules/${moduleId}`;
+  const displayName = String(formData.get("displayName") ?? "");
+  const cardNumberRaw = formData.get("cardNumber");
+  const cardNumber = cardNumberRaw != null && cardNumberRaw !== "" ? Number(cardNumberRaw) : null;
+  const quantity = Number(formData.get("quantity") ?? 1);
+  const markPaid = formData.get("markPaid") === "on";
+  const method = String(formData.get("method") ?? "cash") as "cash" | "check" | "in_kind" | "other";
+
+  const userId = await requireOrgAdmin(orgId);
+
+  let failure: string | null = null;
+  try {
+    const { paidError } = await enterQueenOfHeartsCore({
+      orgId,
+      moduleId,
+      displayName,
+      cardNumber,
+      quantity,
+      confirmedAge18Plus: true, // the organizer is attesting on the buyer's behalf, recording an in-person sale
+      markPaid,
+      method,
+      fundraiserId,
+      actor: userId,
+    });
+    if (paidError) {
+      failure = `Entry added, but it couldn't be marked paid: ${paidError}`;
+    }
+  } catch (err) {
+    failure = err instanceof Error ? err.message : "Something went wrong.";
+  }
+
+  revalidatePath(back);
+  revalidatePath(`/play/${orgSlug}/${fundraiserSlug}/${moduleId}`);
+  if (failure) {
+    redirect(`${back}?tab=grid&entryError=${encodeURIComponent(failure)}#board`);
+  }
+  redirect(`${back}?tab=grid&entryAdded=1#board`);
 }
 
 // ---------------------------------------------------------------------------
