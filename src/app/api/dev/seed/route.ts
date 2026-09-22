@@ -6,6 +6,9 @@ import {
   DEMO_ORG_SLUG,
   DEMO_FUNDRAISER_SLUG,
 } from "@/lib/demo-mode";
+import { enterQueenOfHeartsCore, markQueenOfHeartsEntryPaidCore } from "@/lib/queen-of-hearts";
+import type { QohConfig } from "@/lib/queen-of-hearts-config";
+import { buildDeck, computeJackpotTotals, isQueenOfHearts, resolveDraw, resolveRules } from "@/lib/queen-of-hearts-rules";
 
 // Deliberately NOT the DEMO_MODE_ENABLED flag from lib/demo-mode.ts — that
 // one is on by default outside production so the dashboard's Stripe
@@ -127,6 +130,154 @@ export async function POST() {
     .insert({ org_id: org.id, fundraiser_id: fundraiser.id, type: "fifty_fifty", status: "draft" })
     .select("id")
     .single();
+
+  // Queen of Hearts: a second demo game, one cycle already played out
+  // (deterministic — see below) and a second cycle left open so whoever's
+  // trying the demo can hit "Draw cycle #2 now" themselves and see the
+  // real crypto-random mechanic, not just canned history.
+  await admin
+    .from("module_availability")
+    .insert({ org_id: org.id, module_type: "queen_of_hearts", enabled: true });
+
+  const qohConfigSeed: QohConfig = {
+    ticketPriceCents: 500,
+    jackpotShareBps: 5500,
+    jackpotPercentIfWinnerAbsentBps: 5000,
+    prizeTable: { joker: 10000, secondaryQueen: 5000, highFace: 2500, numbered: 1000 },
+    jackpotSeedCents: 5000,
+    organizerConfirmedCompliance: true,
+    organizerConfirmedComplianceAt: new Date().toISOString(),
+  };
+  const { data: qohModule } = await admin
+    .from("modules")
+    .insert({
+      org_id: org.id,
+      fundraiser_id: fundraiser.id,
+      type: "queen_of_hearts",
+      status: "active",
+      name: "Queen of Hearts",
+      config: qohConfigSeed,
+    })
+    .select("id")
+    .single();
+
+  if (qohModule) {
+    // A hand-arranged board, not the real crypto-random shuffleBoard() —
+    // this is fixture data, and a real shuffle could put the Queen at
+    // position 2 and end the game on the very first seed run. Position 1
+    // stays hidden (nothing ever reveals it here); position 2 is what
+    // cycle 1's draw below actually reveals.
+    const qohDeck = buildDeck();
+    const queenIndex = qohDeck.findIndex(isQueenOfHearts);
+    [qohDeck[0], qohDeck[queenIndex]] = [qohDeck[queenIndex], qohDeck[0]];
+    const sevenSpadesIndex = qohDeck.findIndex(
+      (c) => c.type === "standard" && c.rank === "7" && c.suit === "Spades",
+    );
+    [qohDeck[1], qohDeck[sevenSpadesIndex]] = [qohDeck[sevenSpadesIndex], qohDeck[1]];
+
+    await admin.from("draws").insert({
+      org_id: org.id,
+      module_id: qohModule.id,
+      segment: "board_shuffle",
+      algorithm: "demo seed fixture — not a live crypto draw",
+      inputs: {},
+      result: { board: qohDeck },
+      actor: ownerId,
+    });
+
+    // Cycle 1 entries via the real enterQueenOfHeartsCore (service-role,
+    // same validation/price-snapshot/cycle-detection every real entry
+    // goes through) — no hand-rolled insert logic duplicating it.
+    const owen = await enterQueenOfHeartsCore({
+      orgId: org.id,
+      moduleId: qohModule.id,
+      displayName: "Owen Patel",
+      cardNumber: 2,
+      confirmedAge18Plus: true,
+    });
+    await enterQueenOfHeartsCore({
+      orgId: org.id,
+      moduleId: qohModule.id,
+      displayName: "Zoe Bennett",
+      cardNumber: 31,
+      confirmedAge18Plus: true,
+    });
+    await enterQueenOfHeartsCore({
+      orgId: org.id,
+      moduleId: qohModule.id,
+      displayName: "Caleb Ruiz",
+      quantity: 2,
+      confirmedAge18Plus: true, // day-of — no number
+    });
+
+    // Owen paid cash on the spot — shows the real offline-gift tie-in
+    // (a genuine transactions row) alongside the "Paid" status on the board.
+    await markQueenOfHeartsEntryPaidCore({
+      orgId: org.id,
+      fundraiserId: fundraiser.id,
+      moduleId: qohModule.id,
+      entryId: owen.entryId,
+      method: "cash",
+      enteredBy: ownerId,
+    });
+
+    // Resolve cycle 1 by hand — conductQueenOfHeartsDrawCore's weighted
+    // pick is genuinely random with no override, which is correct for a
+    // real drawing but wrong for a reproducible seed. resolveDraw() is
+    // the same pure math the real draw uses; only the random *selection*
+    // of Owen as the winner is skipped, not the outcome/prize logic.
+    const qohRules = resolveRules(qohConfigSeed);
+    const { data: qohEntriesSoFar } = await admin
+      .from("module_entries")
+      .select("id, cycle_number, display_name, card_number, quantity")
+      .eq("module_id", qohModule.id);
+    const qohEntriesTyped = (qohEntriesSoFar ?? []).map((e) => ({
+      id: e.id as string,
+      cycleNumber: e.cycle_number as number,
+      displayName: e.display_name,
+      cardNumber: e.card_number,
+      quantity: e.quantity,
+    }));
+    const jackpotBeforeCents = computeJackpotTotals(
+      qohRules,
+      qohEntriesTyped,
+      qohConfigSeed.jackpotSeedCents ?? 0,
+    ).jackpotCents;
+    const cycle1Draw = resolveDraw({
+      cycleNumber: 1,
+      winningEntryId: owen.entryId,
+      cardNumber: 2,
+      board: qohDeck,
+      revealedPositions: new Set(),
+      rules: qohRules,
+      jackpotBeforeCents,
+    });
+    await admin.from("draws").insert({
+      org_id: org.id,
+      module_id: qohModule.id,
+      segment: "weekly_draw",
+      cycle_number: 1,
+      algorithm: "demo seed fixture — not a live crypto draw",
+      inputs: { cycleNumber: 1 },
+      result: cycle1Draw,
+      actor: ownerId,
+    });
+
+    // Cycle 2, left open and unresolved on purpose (see comment above).
+    await enterQueenOfHeartsCore({
+      orgId: org.id,
+      moduleId: qohModule.id,
+      displayName: "Ivy Nakamura",
+      cardNumber: 15,
+      confirmedAge18Plus: true,
+    });
+    await enterQueenOfHeartsCore({
+      orgId: org.id,
+      moduleId: qohModule.id,
+      displayName: "Jasper Cole",
+      confirmedAge18Plus: true, // day-of
+    });
+  }
 
   // Populated via the real offline-gift-entry code path — no throwaway
   // insert logic duplicating what addOfflineGiftCore already does. A
