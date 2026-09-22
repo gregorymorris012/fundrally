@@ -299,6 +299,62 @@ Positions are 0-99 internally and shown as 1-100. Focus rings and selected
 outlines use the `--ring` / `--selection` deep blue in `globals.css`, not the
 brand orange.
 
+### Queen of Hearts (in progress — data model + engine only so far)
+
+A second chance-based module, same demo-mode treatment as squares
+(CLAUDE.md's active deviation): `modules.type = 'queen_of_hearts'`, gated
+by `module_availability` like every other chance module. **Built from a
+reference implementation a partner (Patrick) provided** — ported the pure
+game logic, rejected the parts that assumed real-money Stripe checkout for
+a chance module (blocked until Phase 4 compliance, same rule that governs
+squares) and a per-vendor platform-fee tier system that doesn't exist in
+this codebase.
+
+How it works: a board has 54 positions, secretly matched once to a
+standard deck + 2 Jokers (`src/lib/queen-of-hearts-rules.ts`'s
+`shuffleBoard`). Supporters enter the current weekly cycle, optionally
+picking a board number in advance (a "day-of" entry picks live only if
+drawn). A weekly drawing reveals one position; anything but the Queen of
+Hearts pays a fixed consolation prize and rolls into the next cycle, the
+Queen pays the jackpot and ends the game. `ticketPriceCents` and the
+jackpot/fundraiser split are display/bookkeeping inputs, same as squares'
+`pricePerSquareCents` — no checkout exists; real dollars collected in
+person reach the ledger only through offline gift entry tagged to the
+module. Jackpot/fundraiser totals are **derived** from `module_entries`
+each time they're read, never stored as a mutable running balance
+(`computeJackpotTotals` in `queen-of-hearts-rules.ts`) — same philosophy
+as squares deriving winners rather than saving them.
+
+**Every function needing randomness takes a `randomInt` parameter with no
+default** (`queen-of-hearts-rules.ts`'s `RandomInt` type) — unlike the
+reference, which defaulted to `Math.random()`. There is no fallback to
+fall into by accident; only server code is meant to supply
+`crypto.randomInt`, and tests supply a deterministic fake. Rule 1
+(server-authoritative, crypto.randomInt only) is enforced by that
+function signature, not by convention.
+
+Schema (`0023_puzzling_tomas.sql` + `0024_queen_of_hearts_indexes.sql`):
+`module_entries` gained `cycle_number`, `card_number`, and `quantity`
+(all null/1 for every other module type); `draws` gained `cycle_number`
+and two new segments, `board_shuffle` (once per module) and `weekly_draw`
+(once per cycle — the first segment that isn't "once ever"). **The
+partial unique indexes filter on `cycle_number IS [NOT] NULL`, never on
+the literal new enum value** — referencing a just-added enum value
+(`'weekly_draw'`) in an index predicate within the same migration
+transaction fails with Postgres error 55P04 ("unsafe use of new value…
+must be committed before it can be used"). This only bites
+prepared-statement/extended-protocol drivers (`postgres`, what
+`drizzle-kit migrate` uses) — verifying by hand in `psql` (simple query
+protocol) will falsely appear to work and not catch it; verify with
+`drizzle-orm/postgres-js/migrator`'s `migrate()` directly, or just apply
+it for real, before trusting a migration that adds an enum value and
+uses it in the same file.
+
+Not built yet: server actions (create/enter/shuffle/draw/live-pick,
+audited via `draws` + `audit_log`), admin UI, public UI. See
+"Squares pools" above for the tab/checklist/payouts pattern this should
+follow.
+
 ### RLS testing
 
 `tests/rls/cross-tenant.test.ts` (org/membership tables),

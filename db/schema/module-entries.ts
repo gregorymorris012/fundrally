@@ -52,6 +52,24 @@ export const moduleEntries = pgTable("module_entries", {
   transactionId: uuid("transaction_id").references(() => transactions.id, {
     onDelete: "set null",
   }),
+  // Queen of Hearts only, below — null for every other module type, same
+  // pattern as `position` above. A QoH game runs in weekly cycles (a
+  // drawing either pays a consolation prize and rolls to the next cycle,
+  // or hits the Queen and ends the game); an entry belongs to exactly one
+  // cycle. cardNumber (1-54) is the board position this entry picked, or
+  // null for a "day-of" entry that only picks live if it's drawn. A
+  // partial unique index (module_id, cycle_number, card_number) WHERE
+  // card_number IS NOT NULL — added by hand in the migration, same reason
+  // as the squares one above — enforces one claim per number per cycle
+  // (each cycle reuses the same 1-54 numbering, so this can't be a plain
+  // module-wide unique index the way squares' is).
+  cycleNumber: integer("cycle_number"),
+  cardNumber: integer("card_number"),
+  // How many entries this row represents (buying "3 tickets" is one row,
+  // quantity 3, not three rows) — weights the weekly weighted draw.
+  // Defaults to 1 so every existing/other-module-type row has a
+  // well-defined quantity without a backfill.
+  quantity: integer("quantity").notNull().default(1),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

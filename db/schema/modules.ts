@@ -19,6 +19,7 @@ export const moduleType = pgEnum("module_type", [
   "fifty_fifty",
   "golf",
   "item_raffle",
+  "queen_of_hearts",
 ]);
 
 export const moduleStatus = pgEnum("module_status", [
