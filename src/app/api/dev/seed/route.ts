@@ -135,9 +135,17 @@ export async function POST() {
   // (deterministic — see below) and a second cycle left open so whoever's
   // trying the demo can hit "Draw cycle #2 now" themselves and see the
   // real crypto-random mechanic, not just canned history.
-  await admin
+  const { error: qohAvailabilityError } = await admin
     .from("module_availability")
     .insert({ org_id: org.id, module_type: "queen_of_hearts", enabled: true });
+  if (qohAvailabilityError) {
+    return NextResponse.json(
+      {
+        error: `failed to enable queen_of_hearts (likely missing production migrations 0023-0025): ${qohAvailabilityError.message}`,
+      },
+      { status: 500 },
+    );
+  }
 
   const qohConfigSeed: QohConfig = {
     ticketPriceCents: 500,
@@ -148,7 +156,7 @@ export async function POST() {
     organizerConfirmedCompliance: true,
     organizerConfirmedComplianceAt: new Date().toISOString(),
   };
-  const { data: qohModule } = await admin
+  const { data: qohModule, error: qohModuleError } = await admin
     .from("modules")
     .insert({
       org_id: org.id,
@@ -160,8 +168,20 @@ export async function POST() {
     })
     .select("id")
     .single();
+  // Never swallow this silently — a missing production migration (or any
+  // other failure here) means the whole Queen of Hearts seed below is
+  // skipped, but the route would otherwise still report {ok:true} as if
+  // nothing were wrong.
+  if (qohModuleError || !qohModule) {
+    return NextResponse.json(
+      {
+        error: `failed to create Queen of Hearts module (likely missing production migrations 0023-0025): ${qohModuleError?.message ?? "unknown error"}`,
+      },
+      { status: 500 },
+    );
+  }
 
-  if (qohModule) {
+  {
     // A hand-arranged board, not the real crypto-random shuffleBoard() —
     // this is fixture data, and a real shuffle could put the Queen at
     // position 2 and end the game on the very first seed run. Position 1
