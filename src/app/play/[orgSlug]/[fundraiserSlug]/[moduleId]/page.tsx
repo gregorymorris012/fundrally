@@ -19,6 +19,7 @@ const MODULE_TYPE_LABELS: Record<string, string> = {
   fifty_fifty: "50/50",
   item_raffle: "Item raffle",
   wheel: "Prize wheel",
+  queen_of_hearts: "Queen of Hearts",
 };
 
 const GRID_SIZE = 10;

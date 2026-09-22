@@ -350,10 +350,60 @@ protocol) will falsely appear to work and not catch it; verify with
 it for real, before trusting a migration that adds an enum value and
 uses it in the same file.
 
-Not built yet: server actions (create/enter/shuffle/draw/live-pick,
-audited via `draws` + `audit_log`), admin UI, public UI. See
-"Squares pools" above for the tab/checklist/payouts pattern this should
-follow.
+Server actions (`src/lib/queen-of-hearts.ts`) are built: configure rules,
+shuffle the board (once), enter (free demo participation), mark an entry
+paid/void via `addOfflineGiftCore` (same reuse rule as squares), and the
+weekly draw with its live-pick pause. A few things worth knowing:
+
+- **Every `*Core` function is service-role only, no `createClient()`
+  anywhere inside it** — same boundary as `markSquarePaidCore`/
+  `drawSquaresCore`. Authorization is `requireOrgAdmin()`'s job in each
+  `"use server"` wrapper, not the Core function's; this is also what
+  makes the Core functions directly testable without a real Next.js
+  request scope. `loadModule()` reads via the service role for the same
+  reason, with the org scoped by an explicit `.eq("org_id", orgId)`, not
+  by RLS.
+- **`draws` stays append-only** (no `UPDATE` grant for `service_role`,
+  by design) — a "day-of" entry's pending live pick is *not* a partial
+  `draws` row waiting to be updated. It's `modules.config.pendingDrawing`
+  (small, mutable, current-state — same shelf as squares'
+  `locked`/`joinPasswordHash`), cleared once `resolveQueenOfHeartsLivePick`
+  produces the one complete row that segment ever gets.
+- **A guest's own free entry is not audited**, matching `joinModuleCore`'s
+  existing precedent — only admin/money/random-outcome actions are
+  (`qoh.board_shuffled`, `qoh.draw_resolved`, `qoh.draw_awaiting_live_pick`,
+  `qoh.entry_paid`, `qoh.entry_payment_voided`, `qoh.rules_updated`).
+- **The Queen of Hearts closes the module** (`status = 'closed'`) when
+  drawn — no separate "game completed" flag; `currentCycleNumber()` in
+  `queen-of-hearts-rules.ts` also derives `'completed'` independently from
+  the same `draws` history, so the two can't drift.
+- **Fixed a real RLS gap while wiring this up**: `0014`'s
+  `"public can read active chance modules"` anon policy hardcoded the
+  chance-module type list and predated `queen_of_hearts` — without
+  `0025_queen_of_hearts_public_read.sql`, a guest's read of a QoH module
+  row (and, transitively, of its `module_entries`/`draws` rows, whose own
+  anon policies check the module's visibility via an RLS-enforced
+  subquery) would have been silently filtered to nothing. Grep for every
+  other place chance types are hardcoded together
+  (`CHANCE_MODULE_TYPES`/`MODULE_TYPE_LABELS` in `src/lib/modules.ts` and
+  the modules admin/list pages) before adding a *third* chance module.
+- Test coverage: `tests/rls/queen-of-hearts-lifecycle.test.ts` needs only
+  **one** real signed-in test user, not two — every `*Core` function takes
+  a caller-supplied `orgId` and a plain actor-id string, not an
+  authenticated session, so proving org-isolation only needs a second
+  `organizations` row (inserted directly via the service role), not a
+  second real login. Saved a `TEST_PHONES` slot and, more importantly,
+  sidestepped a real trap: `GOTRUE_SMS_TEST_OTP` is baked into the local
+  auth container's environment from `supabase/config.toml` at
+  *container-creation* time, not live-reloaded — editing `config.toml`
+  and `docker restart`-ing the auth container does **not** pick up a
+  newly added test phone number; only a real `supabase stop && supabase
+  start` cycle does (confirmed by checking `docker exec
+  supabase_auth_fundrally env | grep TEST_OTP` after a restart and seeing
+  the new number still missing).
+
+Not built yet: admin UI, public UI. See "Squares pools" above for the
+tab/checklist/payouts pattern this should follow.
 
 ### RLS testing
 

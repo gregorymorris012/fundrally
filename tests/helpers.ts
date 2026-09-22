@@ -39,7 +39,18 @@ export function serviceClient(): SupabaseClient {
 //   5-7: tests/rls/phase2-cross-tenant.test.ts
 //   8:   tests/money/webhook-handlers.test.ts
 //   9:   tests/money/purchase-flow.test.ts
-//   10-12: tests/rls/squares-lifecycle.test.ts
+//   10-11: tests/rls/squares-lifecycle.test.ts
+//   12:    tests/rls/queen-of-hearts-lifecycle.test.ts (only one real
+//          sign-in needed there — see that file's header comment for why)
+//
+// Adding a 14th/15th number here isn't enough on its own: GOTRUE_SMS_TEST_OTP
+// is baked into the local auth container's environment from config.toml at
+// container-creation time, not live-reloaded — a plain `docker restart`
+// (or editing config.toml alone) does NOT pick up a newly added number,
+// only a real `supabase stop && supabase start` cycle does. Prefer reusing
+// an already-provisioned, currently-unused index (there's usually one —
+// check which indices below a test file actually calls signInTestUser
+// with, vs. what a stale allocation comment claims) over adding one.
 const TEST_PHONES = [
   "+15005550001",
   "+15005550002",

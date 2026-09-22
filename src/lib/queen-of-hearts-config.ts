@@ -83,4 +83,11 @@ export type QohConfig = {
   organizerConfirmedCompliance?: boolean;
   organizerConfirmedComplianceAt?: string; // ISO timestamp
   showBoardNumbers?: boolean; // visual 1-54 label on each position; defaults to on
+  // Set while a "day-of" entry's winning ticket is waiting on its live
+  // number pick — mirrors squares' locked/joinPasswordHash living in
+  // config rather than a dedicated column, since it's small, mutable,
+  // current-state (not history; the resolved outcome, once picked, is
+  // what the append-only `draws` row records). Entries are paused while
+  // this is set. Cleared once resolveQueenOfHeartsLivePick runs.
+  pendingDrawing?: { cycleNumber: number; entryId: string } | null;
 };

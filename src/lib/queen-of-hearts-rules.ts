@@ -267,6 +267,28 @@ export function computeJackpotTotals(
   return { jackpotCents, fundraiserShareCents, potCents: jackpotCents + fundraiserShareCents };
 }
 
+export type WeeklyDrawSummary = {
+  cycleNumber: number;
+  outcome: DrawOutcome;
+  revealedPosition: number;
+};
+
+/**
+ * Which cycle entries/draws should target next, derived purely from past
+ * weekly_draw rows — never stored. A CONSOLATION result always advances
+ * the cycle by exactly one; a JACKPOT ends the game. No weekly_draw rows
+ * yet means the game hasn't drawn once and is still in cycle 1.
+ */
+export function currentCycleNumber(weeklyDraws: WeeklyDrawSummary[]): number | "completed" {
+  if (weeklyDraws.some((d) => d.outcome === "JACKPOT")) return "completed";
+  return weeklyDraws.filter((d) => d.outcome === "CONSOLATION").length + 1;
+}
+
+/** Every board position permanently revealed so far, across every past cycle. */
+export function revealedPositions(weeklyDraws: WeeklyDrawSummary[]): Set<number> {
+  return new Set(weeklyDraws.map((d) => d.revealedPosition));
+}
+
 export function centsToDisplay(cents: number): string {
   return `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }

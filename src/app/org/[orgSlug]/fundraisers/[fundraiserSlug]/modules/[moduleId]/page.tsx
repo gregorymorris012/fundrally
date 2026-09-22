@@ -55,11 +55,12 @@ const MODULE_TYPE_LABELS: Record<string, string> = {
   fifty_fifty: "50/50",
   item_raffle: "Item raffle",
   wheel: "Prize wheel",
+  queen_of_hearts: "Queen of Hearts",
   auction: "Auction",
   golf: "Golf outing",
 };
 
-const CHANCE_MODULE_TYPES = ["wheel", "squares", "fifty_fifty", "item_raffle"];
+const CHANCE_MODULE_TYPES = ["wheel", "squares", "fifty_fifty", "item_raffle", "queen_of_hearts"];
 
 const moduleStatusVariant = {
   draft: "secondary",

@@ -70,7 +70,13 @@ export async function createProductModule(formData: FormData) {
 // unlike product's immediate 'active' — chance modules follow the full
 // create -> configure -> launch -> manage -> close lifecycle; product
 // doesn't model that yet.
-const CHANCE_MODULE_TYPES = ["wheel", "squares", "fifty_fifty", "item_raffle"] as const;
+const CHANCE_MODULE_TYPES = [
+  "wheel",
+  "squares",
+  "fifty_fifty",
+  "item_raffle",
+  "queen_of_hearts",
+] as const;
 type ChanceModuleType = (typeof CHANCE_MODULE_TYPES)[number];
 
 export async function createChanceModuleCore(input: {

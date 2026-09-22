@@ -176,6 +176,13 @@
       "when": 1790096661238,
       "tag": "0024_queen_of_hearts_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1790097216777,
+      "tag": "0025_queen_of_hearts_public_read",
+      "breakpoints": true
     }
   ]
 }
