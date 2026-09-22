@@ -447,8 +447,33 @@ tab/checklist pattern as squares (Grid/Players/Settings/Rules/Share,
   the value is correct — check the split fragments individually, or
   render in a real browser, before concluding something's broken.
 
-Not built yet: the real public entry flow (Phase 4) — picking a number,
-day-of entry, the actual board display for guests.
+The public entry flow (Phase 4) is built — the `queen_of_hearts` branch
+in the `/play/[orgSlug]/[fundraiserSlug]/[moduleId]` page. Picking an
+open board position (`?number=N`, a server-rendered `Link` via
+`QohBoard`'s `claimHrefBase`, not a client click handler — works without
+JS, same pattern as squares' public board) shows an "Entering with #N"
+card; a separate always-visible card covers a day-of (no-number) entry.
+Both post to `enterQueenOfHearts` (the guest wrapper from Phase 2/3, no
+admin auth). A few things worth knowing:
+
+- **Entries pause while a live pick is pending, or once the game's
+  over** — the board still renders (so a visitor can see the final state
+  and who won), but neither entry form does.
+- **The public page never fetches the `board_shuffle` draw at all** —
+  only `weekly_draw` rows (which embed the revealed `card` in their own
+  `result`). That's what keeps an unrevealed card's identity from ever
+  reaching a guest, not a filter applied after fetching it.
+- **The board shows only the current cycle's claims** — same
+  stale-claim-from-a-past-cycle reasoning as the admin page (Phase 3).
+- Verified by requesting `?number=` for an already-claimed position
+  (correctly no entry card), an already-revealed position (correctly no
+  entry card), and a genuinely open one (correctly renders, with the
+  right price and the right form action) against the same seeded local
+  pool used to verify Phase 3.
+
+Not built yet: nothing from the original phase plan — Queen of Hearts'
+demo-mode module is feature-complete through data model, engine, server
+actions, org-admin UI, and public entry.
 
 ### RLS testing
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import type { QohCard } from "@/lib/queen-of-hearts-config";
 
@@ -41,12 +42,21 @@ export function QohBoard({
   showNumbers = true,
   selectedPosition = null,
   onPositionClick,
+  claimHrefBase = null,
+  claimHrefSuffix = "",
 }: {
   entries: QohBoardEntry[];
   reveals: QohBoardReveal[];
   showNumbers?: boolean;
   selectedPosition?: number | null;
+  // Admin mode: every square (open or claimed) is clickable via this
+  // handler — see QohAdminBoard.
   onPositionClick?: (position: number) => void;
+  // Public mode: an open position links to `${claimHrefBase}${position}${suffix}`
+  // — a plain server-rendered link, not a client click handler, so
+  // picking a number works without JS. Mirrors squares-board.tsx.
+  claimHrefBase?: string | null;
+  claimHrefSuffix?: string;
 }) {
   const [hover, setHover] = useState<number | null>(null);
   const byPosition = new Map(entries.map((e) => [e.position, e]));
@@ -69,6 +79,8 @@ export function QohBoard({
         const isSelected = selectedPosition === position;
         const isHovered = hover === position;
         const clickable = !!onPositionClick && !reveal;
+        const href =
+          !entry && !reveal && claimHrefBase != null ? `${claimHrefBase}${position}${claimHrefSuffix}` : null;
 
         const cellClass = cn(
           "group relative flex aspect-[3/4] min-w-0 flex-col items-center justify-center rounded-md border border-border/80 text-xs font-semibold outline-none",
@@ -79,7 +91,7 @@ export function QohBoard({
           reveal && "bg-amber-200 dark:bg-amber-500/30",
           (isHovered || isSelected) && "z-10 ring-2 ring-selection ring-inset",
           isSelected && "bg-selection/15",
-          clickable && "cursor-pointer hover:bg-muted",
+          (clickable || href) && "cursor-pointer hover:bg-muted",
         );
 
         const content = (
@@ -134,6 +146,13 @@ export function QohBoard({
             >
               {content}
             </button>
+          );
+        }
+        if (href) {
+          return (
+            <Link key={position} href={href} aria-label={`Position ${position}: open`} {...common}>
+              {content}
+            </Link>
           );
         }
         return (

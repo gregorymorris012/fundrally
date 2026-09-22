@@ -14,8 +14,16 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SquaresBoard } from "@/components/squares/squares-board";
 import { cn } from "@/lib/utils";
 import type { QohConfig } from "@/lib/queen-of-hearts-config";
-import type { QohEntry, WeeklyDrawSummary } from "@/lib/queen-of-hearts-rules";
+import {
+  currentCycleNumber,
+  revealedPositions as qohRevealedPositions,
+  type QohEntry,
+  type ResolvedDraw,
+  type WeeklyDrawSummary,
+} from "@/lib/queen-of-hearts-rules";
 import { QohInfo } from "@/components/queen-of-hearts/qoh-info";
+import { QohBoard } from "@/components/queen-of-hearts/qoh-board";
+import { enterQueenOfHearts } from "@/lib/queen-of-hearts";
 
 const MODULE_TYPE_LABELS: Record<string, string> = {
   squares: "Squares",
@@ -51,10 +59,10 @@ export default async function PlayModulePage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; fundraiserSlug: string; moduleId: string }>;
-  searchParams: Promise<{ claim?: string; pw?: string }>;
+  searchParams: Promise<{ claim?: string; pw?: string; number?: string }>;
 }) {
   const { orgSlug, fundraiserSlug, moduleId } = await params;
-  const { claim, pw } = await searchParams;
+  const { claim, pw, number: numberParam } = await searchParams;
 
   // Anon-capable client — db/migrations/0012_module_entries_policies.sql /
   // 0014_draws_and_squares_positions.sql are what make this readable for a
@@ -89,33 +97,70 @@ export default async function PlayModulePage({
   const squaresConfig = (module_.config as SquaresConfig | null) ?? {};
   const qohConfig = (module_.config as QohConfig | null) ?? {};
 
-  // Phase 3 (org-admin UI) shipped before Phase 4 (this page's real QoH
-  // entry flow). Rather than let a QoH visitor fall through to the
-  // generic join-form fallback below — which calls joinModuleCore, which
-  // doesn't set cycle_number/card_number and would silently create an
-  // orphaned entry belonging to no cycle — show the rules/jackpot
-  // read-only until the real flow exists. See "Queen of Hearts" in
-  // CLAUDE.md.
-  const { data: qohEntriesForInfo } = isQueenOfHearts
+  // Queen of Hearts' own entry flow (below, near the generic fallback):
+  // never falls through to joinModuleCore, which doesn't set
+  // cycle_number/card_number and would silently create an entry
+  // belonging to no cycle. See "Queen of Hearts" in CLAUDE.md.
+  const { data: qohEntriesRaw } = isQueenOfHearts
     ? await supabase
         .from("module_entries")
         .select("id, cycle_number, display_name, card_number, quantity")
         .eq("module_id", module_.id)
     : { data: [] };
-  const qohEntriesTyped: QohEntry[] = (qohEntriesForInfo ?? []).map((e) => ({
+  const qohEntriesTyped: QohEntry[] = (qohEntriesRaw ?? []).map((e) => ({
     id: e.id as string,
     cycleNumber: e.cycle_number as number,
     displayName: e.display_name,
     cardNumber: e.card_number,
     quantity: e.quantity,
   }));
-  const { data: qohWeeklyDrawRowsForInfo } = isQueenOfHearts
-    ? await supabase.from("draws").select("result").eq("module_id", module_.id).eq("segment", "weekly_draw")
+  // Every weekly_draw row's full result (card included) — never the raw
+  // board_shuffle draw itself, which would leak unrevealed card
+  // identities to a guest. See resolveDraw()'s discipline in
+  // queen-of-hearts-rules.ts and getPublicState()'s equivalent in the
+  // reference this was adapted from.
+  const { data: qohWeeklyDrawRows } = isQueenOfHearts
+    ? await supabase
+        .from("draws")
+        .select("result")
+        .eq("module_id", module_.id)
+        .eq("segment", "weekly_draw")
+        .order("cycle_number", { ascending: true })
     : { data: [] };
-  const qohWeeklyDrawsForInfo: WeeklyDrawSummary[] = (qohWeeklyDrawRowsForInfo ?? []).map((r) => {
-    const result = r.result as { cycleNumber: number; outcome: "JACKPOT" | "CONSOLATION"; revealedPosition: number };
-    return { cycleNumber: result.cycleNumber, outcome: result.outcome, revealedPosition: result.revealedPosition };
-  });
+  const qohWeeklyDraws: ResolvedDraw[] = (qohWeeklyDrawRows ?? []).map((r) => r.result as ResolvedDraw);
+  const qohWeeklyDrawsForInfo: WeeklyDrawSummary[] = qohWeeklyDraws.map((d) => ({
+    cycleNumber: d.cycleNumber,
+    outcome: d.outcome,
+    revealedPosition: d.revealedPosition,
+  }));
+  const qohCycle = currentCycleNumber(qohWeeklyDrawsForInfo);
+  const qohRevealedSet = qohRevealedPositions(qohWeeklyDrawsForInfo);
+  const qohReveals = qohWeeklyDraws.map((d) => ({ position: d.revealedPosition, card: d.card }));
+  const qohEntryNameById = new Map(qohEntriesTyped.map((e) => [e.id, e.displayName]));
+
+  // Current cycle's board claims only — an unrevealed pick from a past
+  // cycle is stale (numbers reset each cycle; only the actual winning
+  // position is permanently revealed). Never shows paid/unpaid — that
+  // stays admin-only, same discipline as squares' public board.
+  const qohBoardEntries =
+    qohCycle === "completed"
+      ? []
+      : qohEntriesTyped
+          .filter((e) => e.cycleNumber === qohCycle && e.cardNumber != null)
+          .map((e) => ({ position: e.cardNumber as number, name: e.displayName }));
+
+  const qohSelectedNumber =
+    numberParam != null && /^\d+$/.test(numberParam) ? Number(numberParam) : null;
+  const qohNumberIsOpen =
+    isQueenOfHearts &&
+    module_.status === "active" &&
+    qohCycle !== "completed" &&
+    !qohConfig.pendingDrawing &&
+    qohSelectedNumber != null &&
+    qohSelectedNumber >= 1 &&
+    qohSelectedNumber <= 54 &&
+    !qohRevealedSet.has(qohSelectedNumber) &&
+    !qohBoardEntries.some((e) => e.position === qohSelectedNumber);
   const colLabel = squaresConfig.colLabel || "Team A"; // across the top
   const rowLabel = squaresConfig.rowLabel || "Team B"; // down the side
 
@@ -208,17 +253,151 @@ export default async function PlayModulePage({
         </Card>
       ) : isQueenOfHearts ? (
         <>
-          <QohInfo config={qohConfig} entries={qohEntriesTyped} weeklyDraws={qohWeeklyDrawsForInfo} />
+          {qohConfig.pendingDrawing ? (
+            <Alert variant="warning">
+              <AlertTitle>Entries are paused</AlertTitle>
+              <AlertDescription>
+                This cycle&apos;s drawing already picked a winner who&apos;s choosing their number live — entries
+                reopen once that&apos;s resolved.
+              </AlertDescription>
+            </Alert>
+          ) : qohCycle === "completed" ? (
+            <Alert>
+              <AlertTitle>This game has ended</AlertTitle>
+              <AlertDescription>The Queen of Hearts was drawn — thanks for playing!</AlertDescription>
+            </Alert>
+          ) : (
+            qohSelectedNumber != null &&
+            qohNumberIsOpen && (
+              <Card>
+                <CardHeader>
+                  <CardTitle>Entering with #{qohSelectedNumber}</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <form action={enterQueenOfHearts} className="space-y-3">
+                    <input type="hidden" name="orgId" value={org.id} />
+                    <input type="hidden" name="moduleId" value={module_.id} />
+                    <input type="hidden" name="orgSlug" value={orgSlug} />
+                    <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                    <input type="hidden" name="cardNumber" value={qohSelectedNumber} />
+                    <div className="space-y-1.5">
+                      <Label htmlFor="qoh-name">Your name</Label>
+                      <Input id="qoh-name" name="displayName" required autoFocus maxLength={100} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="qoh-quantity">Entries</Label>
+                      <Input id="qoh-quantity" name="quantity" type="number" min={1} defaultValue={1} className="w-20" />
+                    </div>
+                    <label className="flex items-start gap-2 text-sm">
+                      <input type="checkbox" name="confirmedAge18Plus" required className="mt-0.5 h-4 w-4 accent-[var(--selection)]" />
+                      <span>I&apos;m 18 or older.</span>
+                    </label>
+                    <Button type="submit" className="w-full">
+                      Enter with #{qohSelectedNumber}
+                      {qohConfig.ticketPriceCents ? ` (${centsToDollars(qohConfig.ticketPriceCents)}/entry)` : " (demo)"}
+                    </Button>
+                  </form>
+                </CardContent>
+              </Card>
+            )
+          )}
+
           <Card>
             <CardHeader>
-              <CardTitle>Entries aren&apos;t open here yet</CardTitle>
+              <CardTitle>
+                Board — {qohCycle === "completed" ? "game over" : `cycle #${qohCycle}`}
+              </CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground">
-                The organizer is still setting up online entry for this pool. Ask them how to join for now.
-              </p>
+            <CardContent className="space-y-3">
+              {qohCycle !== "completed" && !qohConfig.pendingDrawing && (
+                <p className="text-xs text-muted-foreground">
+                  Tap an open number to enter with it, or enter without one below — you&apos;ll pick live if you&apos;re
+                  drawn.
+                </p>
+              )}
+              <QohBoard
+                entries={qohBoardEntries}
+                reveals={qohReveals}
+                showNumbers={qohConfig.showBoardNumbers !== false}
+                selectedPosition={qohSelectedNumber}
+                claimHrefBase={
+                  qohCycle !== "completed" && !qohConfig.pendingDrawing
+                    ? `/play/${orgSlug}/${fundraiserSlug}/${module_.id}?number=`
+                    : null
+                }
+              />
             </CardContent>
           </Card>
+
+          {qohCycle !== "completed" && !qohConfig.pendingDrawing && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Enter without a number</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-3 text-sm text-muted-foreground">
+                  Don&apos;t want to pick now? Join as a &quot;day-of&quot; entry — you&apos;ll choose live, in front of
+                  everyone, only if you&apos;re drawn.
+                </p>
+                <form action={enterQueenOfHearts} className="space-y-3">
+                  <input type="hidden" name="orgId" value={org.id} />
+                  <input type="hidden" name="moduleId" value={module_.id} />
+                  <input type="hidden" name="orgSlug" value={orgSlug} />
+                  <input type="hidden" name="fundraiserSlug" value={fundraiserSlug} />
+                  <div className="flex flex-wrap items-end gap-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="qoh-dayof-name">Your name</Label>
+                      <Input id="qoh-dayof-name" name="displayName" required maxLength={100} className="w-56" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="qoh-dayof-quantity">Entries</Label>
+                      <Input id="qoh-dayof-quantity" name="quantity" type="number" min={1} defaultValue={1} className="w-20" />
+                    </div>
+                  </div>
+                  <label className="flex items-start gap-2 text-sm">
+                    <input type="checkbox" name="confirmedAge18Plus" required className="mt-0.5 h-4 w-4 accent-[var(--selection)]" />
+                    <span>I&apos;m 18 or older.</span>
+                  </label>
+                  <Button type="submit" variant="outline">
+                    Enter without a number
+                    {qohConfig.ticketPriceCents ? ` (${centsToDollars(qohConfig.ticketPriceCents)}/entry)` : " (demo)"}
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
+
+          {qohWeeklyDraws.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Past winners</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="divide-y divide-border rounded-lg border border-border text-sm">
+                  {qohWeeklyDraws
+                    .slice()
+                    .reverse()
+                    .map((d) => (
+                      <div key={d.cycleNumber} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                        <div>
+                          <p className="font-medium text-foreground">
+                            Cycle #{d.cycleNumber} — #{d.revealedPosition} · {d.card.label}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {qohEntryNameById.get(d.winningEntryId) ?? "Unknown entrant"}
+                          </p>
+                        </div>
+                        <p className="font-medium text-foreground">
+                          {d.outcome === "JACKPOT" ? `Jackpot — ${centsToDollars(d.payoutCents ?? 0)}` : centsToDollars(d.prizeCents ?? 0)}
+                        </p>
+                      </div>
+                    ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          <QohInfo config={qohConfig} entries={qohEntriesTyped} weeklyDraws={qohWeeklyDrawsForInfo} />
         </>
       ) : isSquares ? (
         <>
